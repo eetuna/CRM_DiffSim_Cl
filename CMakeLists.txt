@@ -35,6 +35,8 @@ set(CRMSOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_SupportFunctions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffEquilibrium.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffEquilibrium.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffDynamics.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffDynamics.cpp
 
     ${CMAKE_CURRENT_SOURCE_DIR}/numerical/minpack.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/numerical/minpack_TemplateDefinitions.hpp
@@ -178,6 +180,19 @@ target_include_directories(test_straight_rod PUBLIC
     "${PROJECT_SOURCE_DIR}/numerical"
 )
 
+add_executable(test_cp21_dynamics_smoke
+    test_cp21_dynamics_smoke.cpp
+)
+
+target_link_libraries(test_cp21_dynamics_smoke PUBLIC
+    CRMCPPLib
+)
+
+target_include_directories(test_cp21_dynamics_smoke PUBLIC
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/numerical"
+)
+
 # Python bindings (optional, requires pybind11)
 if(pybind11_FOUND)
     pybind11_add_module(crm_diff_py
@@ -212,4 +227,9 @@ add_test(NAME cpp_reference_harness
 # PHASE C: Straight-rod physics sanity test
 add_test(NAME straight_rod_physics
          COMMAND test_straight_rod
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# CP2.1: Dynamics smoke test
+add_test(NAME dynamics_smoke_cp21
+         COMMAND test_cp21_dynamics_smoke
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
