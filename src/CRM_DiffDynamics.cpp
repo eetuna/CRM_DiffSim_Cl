@@ -151,6 +151,13 @@ int dynamics_forward(
     std::memcpy(out.J_G_xt, C, 36 * sizeof(double));
     std::memcpy(out.J_G_ut, B, 6*NUM_ACT_SET*3 * sizeof(double));
 
+    // Cache inputs for backward pass matrix-dependence
+    std::memcpy(out.u_t_cached, u_t, NUM_ACT_SET*3 * sizeof(double));
+    out.dt_cached = dt;
+    out.L_inserted_cached = L_inserted;
+    std::memcpy(out.K_tip_cached, eq_result_initial.K_tip, 9 * sizeof(double));
+    std::memcpy(out.J_u_zc_cached, eq_result_initial.J_u_zc, 3*NUM_ACT_SET*3 * sizeof(double));
+
     // Step 4: Solve A*x_{t+1} = -C*x_t - B*u_t using FullPivLU
     Map<Matrix<double, 6, 6, RowMajor>> A_map(A);
     Map<Matrix<double, 6, 6, RowMajor>> C_map(C);
@@ -223,6 +230,7 @@ int dynamics_forward(
 int dynamics_backward(
     const DynamicsStepResult& fwd_result,
     const double grad_x_next[6],
+    const CRMForwardKinematicsData& params,
     double grad_x_t[6],
     double grad_u_t[NUM_ACT_SET*3],
     int* lu_rank,
@@ -257,12 +265,60 @@ int dynamics_backward(
         return 2;  // Inaccurate solve
     }
 
-    // Compute gradients
+    // Compute gradient w.r.t. x_t (unchanged)
     Map<VectorXd> grad_xt(grad_x_t, 6);
     grad_xt = -C_map.transpose() * lambda;
 
+    // Compute gradient w.r.t. u_t with matrix-dependence
+    // grad_u_i = -(dr/du_i)^T * lambda
+    // where dr/du_i = dA/du_i * x_next + dB/du_i * u_t + B[:,i]
+
     Map<VectorXd> grad_ut(grad_u_t, 3*NUM_ACT_SET);
-    grad_ut = -B_map.transpose() * lambda;
+    grad_ut.setZero();
+
+    // Extract cached values
+    Map<const VectorXd> x_next_map(fwd_result.x_next, 6);
+    Map<const VectorXd> u_t_map(fwd_result.u_t_cached, 3*NUM_ACT_SET);
+
+    double eps = 1e-6;  // Finite difference epsilon
+
+    for (int i = 0; i < 3*NUM_ACT_SET; i++) {
+        // Perturb u_t[i]
+        double u_pert[3*NUM_ACT_SET];
+        std::memcpy(u_pert, fwd_result.u_t_cached, 3*NUM_ACT_SET * sizeof(double));
+        u_pert[i] += eps;
+
+        // Call equilibrium_forward with perturbed u
+        EquilibriumResult eq_pert;
+        std::memset(&eq_pert, 0, sizeof(EquilibriumResult));
+        int eq_status = equilibrium_forward(u_pert, fwd_result.L_inserted_cached, params, eq_pert);
+
+        if (eq_status != 0) {
+            return 3;  // Equilibrium failed during gradient computation
+        }
+
+        // Compute M, D from K_tip_pert
+        double M_pert[9], D_pert[9];
+        compute_physics_matrices(*(params.CathParams), eq_pert.K_tip, M_pert, D_pert);
+
+        // Compute A_pert, B_pert
+        double A_pert[36], C_pert[36], B_pert[6*NUM_ACT_SET*3];
+        compute_jacobians(M_pert, D_pert, eq_pert.K_tip, eq_pert.J_u_zc,
+                         fwd_result.dt_cached, A_pert, C_pert, B_pert);
+
+        // Compute dA/du_i and dB/du_i via finite differences
+        Map<Matrix<double, 6, 6, RowMajor>> A_pert_map(A_pert);
+        Map<Matrix<double, 6, Dynamic, RowMajor>> B_pert_map(B_pert, 6, 3*NUM_ACT_SET);
+
+        MatrixXd dA_du_i = (A_pert_map - A_map) / eps;  // 6x6
+        MatrixXd dB_du_i = (B_pert_map - B_map) / eps;  // 6x3
+
+        // Compute dr/du_i = dA/du_i * x_next + dB/du_i * u_t + B[:,i]
+        VectorXd dr_du_i = dA_du_i * x_next_map + dB_du_i * u_t_map + B_map.col(i);
+
+        // grad_u[i] = -(dr/du_i)^T * lambda
+        grad_ut(i) = -dr_du_i.dot(lambda);
+    }
 
     return 0;  // Success
 }

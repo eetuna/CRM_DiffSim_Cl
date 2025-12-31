@@ -193,6 +193,19 @@ target_include_directories(test_cp21_dynamics_smoke PUBLIC
     "${PROJECT_SOURCE_DIR}/numerical"
 )
 
+add_executable(test_cp22_dynamics_fd
+    test_cp22_dynamics_fd.cpp
+)
+
+target_link_libraries(test_cp22_dynamics_fd PUBLIC
+    CRMCPPLib
+)
+
+target_include_directories(test_cp22_dynamics_fd PUBLIC
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/numerical"
+)
+
 # Python bindings (optional, requires pybind11)
 if(pybind11_FOUND)
     pybind11_add_module(crm_diff_py
@@ -232,4 +245,9 @@ add_test(NAME straight_rod_physics
 # CP2.1: Dynamics smoke test
 add_test(NAME dynamics_smoke_cp21
          COMMAND test_cp21_dynamics_smoke
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# CP2.2: Dynamics finite difference validation
+add_test(NAME dynamics_fd_cp22
+         COMMAND test_cp22_dynamics_fd
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

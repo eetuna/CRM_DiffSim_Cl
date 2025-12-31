@@ -138,7 +138,7 @@ int main() {
     int lu_rank;
     double rel_residual;
 
-    int bwd_status = dynamics_backward(result, grad_x_next, grad_x_t, grad_u_t,
+    int bwd_status = dynamics_backward(result, grad_x_next, FKParams, grad_x_t, grad_u_t,
                                        &lu_rank, &rel_residual);
 
     std::cout << "  bwd_status = " << bwd_status << std::endl;
