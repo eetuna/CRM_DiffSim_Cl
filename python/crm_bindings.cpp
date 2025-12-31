@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 #include "CRM.hpp"
 #include "CRM_DiffEquilibrium.hpp"
+#include "CRM_DiffDynamics.hpp"
 
 namespace py = pybind11;
 using namespace CRMCatheterModel;
@@ -188,6 +189,232 @@ py::dict py_equilibrium_backward(
     return out;
 }
 
+// Wrapper for dynamics_forward
+py::dict py_dynamics_forward(
+    py::array_t<double> x_t_arr,
+    py::array_t<double> u_t_arr,
+    double dt,
+    double L_inserted,
+    py::dict params_dict
+) {
+    // Validate x_t
+    auto x_t_buf = x_t_arr.request();
+    if (x_t_buf.ndim != 1 || x_t_buf.shape[0] != 6) {
+        throw std::runtime_error("x_t must be 1D array of length 6");
+    }
+
+    // Validate u_t
+    auto u_t_buf = u_t_arr.request();
+    if (u_t_buf.ndim != 1 || u_t_buf.shape[0] != NUM_ACT_SET * 3) {
+        throw std::runtime_error("u_t must be 1D array of length " + std::to_string(NUM_ACT_SET * 3));
+    }
+
+    double* x_t = static_cast<double*>(x_t_buf.ptr);
+    double* u_t = static_cast<double*>(u_t_buf.ptr);
+
+    CRMForwardKinematicsData fk_params = parse_fk_params(params_dict);
+
+    // Zero-initialize result structure
+    DynamicsStepResult result;
+    std::memset(&result, 0, sizeof(DynamicsStepResult));
+
+    int status = dynamics_forward(x_t, u_t, dt, L_inserted, fk_params, result);
+
+    py::dict out;
+    out["status"] = status;
+
+    // Return x_next (6,)
+    auto x_next_arr = py::array_t<double>({6});
+    std::memcpy(x_next_arr.mutable_data(), result.x_next, 6 * sizeof(double));
+    out["x_next"] = x_next_arr;
+
+    // Return observables
+    auto p_tip_arr = py::array_t<double>({3});
+    auto u_tip_arr = py::array_t<double>({3});
+    std::memcpy(p_tip_arr.mutable_data(), result.p_tip, 3 * sizeof(double));
+    std::memcpy(u_tip_arr.mutable_data(), result.u_tip, 3 * sizeof(double));
+    out["p_tip"] = p_tip_arr;
+    out["u_tip"] = u_tip_arr;
+
+    // Return Jacobians (row-major 2D arrays)
+    auto J_G_xnext_arr = py::array_t<double>({6, 6});
+    auto J_G_xt_arr = py::array_t<double>({6, 6});
+    auto J_G_ut_arr = py::array_t<double>({6, NUM_ACT_SET * 3});
+
+    std::memcpy(J_G_xnext_arr.mutable_data(), result.J_G_xnext, 36 * sizeof(double));
+    std::memcpy(J_G_xt_arr.mutable_data(), result.J_G_xt, 36 * sizeof(double));
+    std::memcpy(J_G_ut_arr.mutable_data(), result.J_G_ut, 6 * NUM_ACT_SET * 3 * sizeof(double));
+
+    out["J_G_xnext"] = J_G_xnext_arr;
+    out["J_G_xt"] = J_G_xt_arr;
+    out["J_G_ut"] = J_G_ut_arr;
+
+    // Return equilibrium Jacobians at t+1
+    auto J_p_u0_arr = py::array_t<double>({3, 3});
+    auto J_p_ut_arr = py::array_t<double>({3, NUM_ACT_SET * 3});
+
+    std::memcpy(J_p_u0_arr.mutable_data(), result.J_p_u0, 9 * sizeof(double));
+    std::memcpy(J_p_ut_arr.mutable_data(), result.J_p_ut, 3 * NUM_ACT_SET * 3 * sizeof(double));
+
+    out["J_p_u0"] = J_p_u0_arr;
+    out["J_p_ut"] = J_p_ut_arr;
+
+    // Return physics matrices (3x3)
+    auto M_arr = py::array_t<double>({3, 3});
+    auto D_arr = py::array_t<double>({3, 3});
+    auto K_arr = py::array_t<double>({3, 3});
+
+    std::memcpy(M_arr.mutable_data(), result.M, 9 * sizeof(double));
+    std::memcpy(D_arr.mutable_data(), result.D, 9 * sizeof(double));
+    std::memcpy(K_arr.mutable_data(), result.K, 9 * sizeof(double));
+
+    out["M"] = M_arr;
+    out["D"] = D_arr;
+    out["K"] = K_arr;
+
+    // Return cached inputs for backward pass matrix-dependence
+    auto u_t_cached_arr = py::array_t<double>({NUM_ACT_SET * 3});
+    std::memcpy(u_t_cached_arr.mutable_data(), result.u_t_cached, NUM_ACT_SET * 3 * sizeof(double));
+    out["u_t_cached"] = u_t_cached_arr;
+
+    out["dt_cached"] = result.dt_cached;
+    out["L_inserted_cached"] = result.L_inserted_cached;
+
+    auto K_tip_cached_arr = py::array_t<double>({3, 3});
+    auto J_u_zc_cached_arr = py::array_t<double>({3, NUM_ACT_SET * 3});
+
+    std::memcpy(K_tip_cached_arr.mutable_data(), result.K_tip_cached, 9 * sizeof(double));
+    std::memcpy(J_u_zc_cached_arr.mutable_data(), result.J_u_zc_cached, 3 * NUM_ACT_SET * 3 * sizeof(double));
+
+    out["K_tip_cached"] = K_tip_cached_arr;
+    out["J_u_zc_cached"] = J_u_zc_cached_arr;
+
+    // Return diagnostics
+    out["lu_rank"] = result.lu_rank;
+    out["rel_solve_residual"] = result.rel_solve_residual;
+    out["solve_residual"] = result.solve_residual;
+    out["converged"] = result.converged;
+    out["exit_code"] = result.exit_code;
+
+    return out;
+}
+
+// Wrapper for dynamics_backward
+py::dict py_dynamics_backward(
+    py::dict fwd_result,
+    py::array_t<double> grad_x_next_arr,
+    py::dict params_dict
+) {
+    // Validate grad_x_next
+    auto grad_buf = grad_x_next_arr.request();
+    if (grad_buf.ndim != 1 || grad_buf.shape[0] != 6) {
+        throw std::runtime_error("grad_x_next must be 1D array of length 6");
+    }
+    if (!py::isinstance<py::array_t<double, py::array::c_style | py::array::forcecast>>(grad_x_next_arr)) {
+        throw std::runtime_error("grad_x_next must be float64 C-contiguous array");
+    }
+
+    // Reconstruct DynamicsStepResult from cached data
+    DynamicsStepResult cached;
+    std::memset(&cached, 0, sizeof(DynamicsStepResult));
+
+    // Extract x_next
+    auto x_next_arr = fwd_result["x_next"].cast<py::array_t<double>>();
+    if (x_next_arr.ndim() != 1 || x_next_arr.shape(0) != 6) {
+        throw std::runtime_error("x_next must be (6,) array");
+    }
+    std::memcpy(cached.x_next, x_next_arr.data(), 6 * sizeof(double));
+
+    // Extract Jacobians
+    auto J_G_xnext_arr = fwd_result["J_G_xnext"].cast<py::array_t<double>>();
+    auto J_G_xt_arr = fwd_result["J_G_xt"].cast<py::array_t<double>>();
+    auto J_G_ut_arr = fwd_result["J_G_ut"].cast<py::array_t<double>>();
+
+    if (J_G_xnext_arr.ndim() != 2 || J_G_xnext_arr.shape(0) != 6 || J_G_xnext_arr.shape(1) != 6) {
+        throw std::runtime_error("J_G_xnext must be (6, 6) array");
+    }
+    if (J_G_xt_arr.ndim() != 2 || J_G_xt_arr.shape(0) != 6 || J_G_xt_arr.shape(1) != 6) {
+        throw std::runtime_error("J_G_xt must be (6, 6) array");
+    }
+    if (J_G_ut_arr.ndim() != 2 || J_G_ut_arr.shape(0) != 6 || J_G_ut_arr.shape(1) != NUM_ACT_SET * 3) {
+        throw std::runtime_error("J_G_ut must be (6, " + std::to_string(NUM_ACT_SET * 3) + ") array");
+    }
+
+    std::memcpy(cached.J_G_xnext, J_G_xnext_arr.data(), 36 * sizeof(double));
+    std::memcpy(cached.J_G_xt, J_G_xt_arr.data(), 36 * sizeof(double));
+    std::memcpy(cached.J_G_ut, J_G_ut_arr.data(), 6 * NUM_ACT_SET * 3 * sizeof(double));
+
+    // Extract physics matrices
+    auto M_arr = fwd_result["M"].cast<py::array_t<double>>();
+    auto D_arr = fwd_result["D"].cast<py::array_t<double>>();
+    auto K_arr = fwd_result["K"].cast<py::array_t<double>>();
+
+    if (M_arr.ndim() != 2 || M_arr.shape(0) != 3 || M_arr.shape(1) != 3) {
+        throw std::runtime_error("M must be (3, 3) array");
+    }
+    if (D_arr.ndim() != 2 || D_arr.shape(0) != 3 || D_arr.shape(1) != 3) {
+        throw std::runtime_error("D must be (3, 3) array");
+    }
+    if (K_arr.ndim() != 2 || K_arr.shape(0) != 3 || K_arr.shape(1) != 3) {
+        throw std::runtime_error("K must be (3, 3) array");
+    }
+
+    std::memcpy(cached.M, M_arr.data(), 9 * sizeof(double));
+    std::memcpy(cached.D, D_arr.data(), 9 * sizeof(double));
+    std::memcpy(cached.K, K_arr.data(), 9 * sizeof(double));
+
+    // Extract cached inputs for matrix-dependence
+    auto u_t_cached_arr = fwd_result["u_t_cached"].cast<py::array_t<double>>();
+    if (u_t_cached_arr.ndim() != 1 || u_t_cached_arr.shape(0) != NUM_ACT_SET * 3) {
+        throw std::runtime_error("u_t_cached must be (" + std::to_string(NUM_ACT_SET * 3) + ",) array");
+    }
+    std::memcpy(cached.u_t_cached, u_t_cached_arr.data(), NUM_ACT_SET * 3 * sizeof(double));
+
+    cached.dt_cached = fwd_result["dt_cached"].cast<double>();
+    cached.L_inserted_cached = fwd_result["L_inserted_cached"].cast<double>();
+
+    auto K_tip_cached_arr = fwd_result["K_tip_cached"].cast<py::array_t<double>>();
+    auto J_u_zc_cached_arr = fwd_result["J_u_zc_cached"].cast<py::array_t<double>>();
+
+    if (K_tip_cached_arr.ndim() != 2 || K_tip_cached_arr.shape(0) != 3 || K_tip_cached_arr.shape(1) != 3) {
+        throw std::runtime_error("K_tip_cached must be (3, 3) array");
+    }
+    if (J_u_zc_cached_arr.ndim() != 2 || J_u_zc_cached_arr.shape(0) != 3 || J_u_zc_cached_arr.shape(1) != NUM_ACT_SET * 3) {
+        throw std::runtime_error("J_u_zc_cached must be (3, " + std::to_string(NUM_ACT_SET * 3) + ") array");
+    }
+
+    std::memcpy(cached.K_tip_cached, K_tip_cached_arr.data(), 9 * sizeof(double));
+    std::memcpy(cached.J_u_zc_cached, J_u_zc_cached_arr.data(), 3 * NUM_ACT_SET * 3 * sizeof(double));
+
+    // Parse FK params for backward pass
+    CRMForwardKinematicsData fk_params = parse_fk_params(params_dict);
+
+    // Call backward
+    double* grad_x_next = static_cast<double*>(grad_buf.ptr);
+    double grad_x_t[6];
+    double grad_u_t[NUM_ACT_SET * 3];
+    int lu_rank;
+    double rel_residual;
+
+    int status = dynamics_backward(cached, grad_x_next, fk_params, grad_x_t, grad_u_t, &lu_rank, &rel_residual);
+
+    // Copy gradients to properly allocated arrays
+    auto grad_x_t_arr = py::array_t<double>({6});
+    auto grad_u_t_arr = py::array_t<double>({NUM_ACT_SET * 3});
+
+    std::memcpy(grad_x_t_arr.mutable_data(), grad_x_t, 6 * sizeof(double));
+    std::memcpy(grad_u_t_arr.mutable_data(), grad_u_t, NUM_ACT_SET * 3 * sizeof(double));
+
+    py::dict out;
+    out["status"] = status;
+    out["grad_x_t"] = grad_x_t_arr;
+    out["grad_u_t"] = grad_u_t_arr;
+    out["lu_rank"] = lu_rank;
+    out["rel_residual"] = rel_residual;
+
+    return out;
+}
+
 // Load catheter parameters from file
 CRMCatheterModelParams* py_load_cath_params(const std::string& filepath) {
     CRMCatheterModelParams params = Load_CRMCatheterModelParams(filepath.c_str());
@@ -201,7 +428,7 @@ CatheterConfiguration* py_load_cath_config(const std::string& filepath) {
 }
 
 PYBIND11_MODULE(crm_diff_py, m) {
-    m.doc() = "CRM Differentiable Simulator Python Bindings (CP1.5)";
+    m.doc() = "CRM Differentiable Simulator Python Bindings (CP2.3)";
 
     // Expose ContactModeType enum
     py::enum_<ContactModeType>(m, "ContactModeType")
@@ -225,6 +452,15 @@ PYBIND11_MODULE(crm_diff_py, m) {
     m.def("equilibrium_backward", &py_equilibrium_backward,
           py::arg("fwd_result"), py::arg("grad_p_tip"),
           "Backward pass: compute gradient w.r.t. actuation currents");
+
+    // Expose dynamics primitives
+    m.def("dynamics_forward", &py_dynamics_forward,
+          py::arg("x_t"), py::arg("u_t"), py::arg("dt"), py::arg("L_inserted"), py::arg("params_dict"),
+          "Dynamics forward pass: compute x_next and cache Jacobians");
+
+    m.def("dynamics_backward", &py_dynamics_backward,
+          py::arg("fwd_result"), py::arg("grad_x_next"), py::arg("params_dict"),
+          "Dynamics backward pass: compute gradients w.r.t. x_t and u_t");
 
     // Expose opaque pointer types (needed for parameter dict)
     py::class_<CRMCatheterModelParams>(m, "CRMCatheterModelParams");

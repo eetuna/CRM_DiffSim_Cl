@@ -251,3 +251,11 @@ add_test(NAME dynamics_smoke_cp21
 add_test(NAME dynamics_fd_cp22
          COMMAND test_cp22_dynamics_fd
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# CP2.3: Dynamics Python bindings smoke test
+if(pybind11_FOUND)
+    add_test(NAME dynamics_smoke_cp23_python
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp23_dynamics_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
