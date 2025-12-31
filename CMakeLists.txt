@@ -165,6 +165,19 @@ target_include_directories(test_golden_backward PUBLIC
     "${PROJECT_SOURCE_DIR}/numerical"
 )
 
+add_executable(test_straight_rod
+    test_straight_rod.cpp
+)
+
+target_link_libraries(test_straight_rod PUBLIC
+    CRMCPPLib
+)
+
+target_include_directories(test_straight_rod PUBLIC
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/numerical"
+)
+
 # Python bindings (optional, requires pybind11)
 if(pybind11_FOUND)
     pybind11_add_module(crm_diff_py
@@ -194,4 +207,9 @@ endif()
 # C++ reference harness (used by Python smoke test)
 add_test(NAME cpp_reference_harness
          COMMAND test_cp15_harness
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# PHASE C: Straight-rod physics sanity test
+add_test(NAME straight_rod_physics
+         COMMAND test_straight_rod
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
