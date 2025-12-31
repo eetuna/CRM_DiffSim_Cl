@@ -267,3 +267,11 @@ if(pybind11_FOUND)
                      python3 ${CMAKE_SOURCE_DIR}/python/test_cp24_dynamics_gradcheck.py
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
+
+# CP2.5: Multi-step rollout + backprop smoke test
+if(pybind11_FOUND)
+    add_test(NAME dynamics_rollout_cp25_python
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp25_dynamics_rollout_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
