@@ -148,4 +148,7 @@ dist/
 # Vendor deps (kept local unless explicitly vendored/submodule)
 third_party/autodiff/
 
+# Backup snapshots (created by safety protocol)
+backups/
+
 
