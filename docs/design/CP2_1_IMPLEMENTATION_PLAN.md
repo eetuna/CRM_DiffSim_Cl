@@ -1,16 +1,24 @@
 # CP2.1 Implementation Plan: Core Dynamics Primitive
 
-**Status**: Ready for implementation
-**Date**: 2025-12-31
-**Dependencies**: CP1.1–CP1.8 complete, Section 10 decisions finalized
+**Status**: Ready for implementation (PATCHED)
+**Date**: 2025-12-31 (Updated with CP2.0 patch)
+**Dependencies**: CP1.1–CP1.8 complete, Section 10 resolved, **CP2.0 patch applied**
+
+**CRITICAL**: This plan incorporates **CP2.0_DYNAMICS_PATCH.md** which fixes:
+- BLOCKER A: Added actuation coupling (B ≠ 0)
+- BLOCKER B: Removed Newton solver (direct linear solve)
 
 ---
 
 ## Overview
 
-Implement `dynamics_forward` and `dynamics_backward` in C++ following the v1.1 design with simplified quasi-static force model.
+Implement `dynamics_forward` and `dynamics_backward` in C++ following the v1.1 design with **CP2.0 patch applied**.
 
-**Key Simplification**: Decouple equilibrium from dynamics. Use linearized stiffness model where force `f = -K_tip * u_0`. No nested equilibrium solves in the residual.
+**Key Features**:
+1. **Linear residual**: G = A*x_{t+1} + C*x_t + B*u_t (affine in all arguments)
+2. **Direct solve**: One FullPivLU solve, no Newton iteration
+3. **Actuation coupling**: B ≠ 0 via K*J_u_zc from equilibrium Jacobians
+4. **Controllable dynamics**: ∂x_{t+1}/∂u_t ≠ 0 (enables MPC/iLQR/RL)
 
 ---
 
@@ -51,10 +59,9 @@ struct DynamicsStepResult {
     double K[9];                     // Stiffness matrix (3×3, from K_tip)
 
     // Diagnostics
-    int nl_iterations;               // Newton iterations
-    double final_residual;           // ||G(x_{t+1})||
-    int lu_rank;                     // rank(A) from FullPivLU in backward
-    double rel_solve_residual;       // ||A^T λ - rhs|| / max(||rhs||, 1)
+    double solve_residual;           // ||A*x_{t+1} - rhs|| / ||rhs|| (solve accuracy)
+    int lu_rank;                     // rank(A) from FullPivLU in forward
+    double rel_solve_residual;       // Relative residual from forward solve
     int exit_code;                   // 0=OK, 1=rank-deficient, 2=residual too large
 };
 
@@ -176,34 +183,34 @@ State: x = [u_0, v_0] ∈ R^6
   u_0 ∈ R^3: base curvature
   v_0 ∈ R^3: base curvature rate
 
-Dynamics (Backward Euler):
+Dynamics (Backward Euler with actuation coupling):
   u_{t+1} = u_t + dt * v_{t+1}
-  M v_{t+1} = M v_t - dt * (D v_{t+1} + K u_{t+1})
+  M v_{t+1} = M v_t - dt * (D v_{t+1} + K u_{t+1}) + dt * K * J_u_zc * u_t
 
 Residual G(x_{t+1}, x_t, u_t) ∈ R^6:
-  G_u = u_{t+1} - u_t - dt * v_{t+1}                          (3×1)
-  G_v = M v_{t+1} - M v_t + dt * D v_{t+1} + dt * K u_{t+1}   (3×1)
+  G_u = u_{t+1} - u_t - dt * v_{t+1}                                         (3×1)
+  G_v = M v_{t+1} - M v_t + dt*D v_{t+1} + dt*K u_{t+1} - dt*K*J_u_zc*u_t   (3×1)
 
 Combined:
-  G = [G_u] = [u_{t+1} - u_t - dt * v_{t+1}              ]
-      [G_v]   [M v_{t+1} - M v_t + dt*D v_{t+1} + dt*K u_{t+1}]
+  G = [G_u] = [u_{t+1} - u_t - dt * v_{t+1}                             ]
+      [G_v]   [M v_{t+1} - M v_t + dt*D v_{t+1} + dt*K u_{t+1} - dt*K*J_u_zc*u_t]
 ```
 
-**Matrix form**:
+**Affine form** (linear residual):
 ```
-G = [I,   -dt*I] [u_{t+1}]   -  [I,  0] [u_t]
-    [dt*K, M+dt*D] [v_{t+1}]      [0,  M] [v_t]
-
-  = A_impl * x_{t+1} - C_impl * x_t
+G = A * x_{t+1} + C * x_t + B * u_t = 0
 ```
 
 where:
 ```
-A_impl = [I,      -dt*I   ]  (6×6)
-         [dt*K,   M+dt*D  ]
+A = [I,       -dt*I    ]  (6×6)
+    [dt*K,    M+dt*D   ]
 
-C_impl = [I,  0]  (6×6)
-         [0,  M]
+C = [-I,  0 ]  (6×6)
+    [0,  -M ]
+
+B = [0           ]  (6×3N, N=NUM_ACT_SET)
+    [-dt*K*J_u_zc]
 ```
 
 ---
@@ -283,18 +290,55 @@ for (int i = 0; i < 3; i++) {
 }
 ```
 
-### 3.3 Jacobian B = ∂G/∂u_t
+### 3.3 Jacobian B = ∂G/∂u_t (PATCHED - non-zero!)
 
-For v1.1 simplified model (no direct control coupling in residual):
+**CP2.0 Patch**: Add actuation coupling via equilibrium Jacobians:
+
 ```
-B = 0  (6×3)
+B = ∂G/∂u_t = [0           ]  (6×3N, N=NUM_ACT_SET)
+               [-dt*K*J_u_zc]
+
+where:
+  K = K_tip from equilibrium_forward (3×3)
+  J_u_zc from equilibrium_forward (3×3N)
+  K * J_u_zc: matrix product (3×3N)
 ```
 
-**Future v1.2**: Add coupling via equilibrium Jacobians:
+**Dimensions** (for NUM_ACT_SET=1):
+- B is 6×3
+- Top block (3×3): zeros
+- Bottom block (3×3): -dt*K*J_u_zc
+
+**Physical interpretation**:
+- J_u_zc: how actuation affects tip curvature (∂u_tip/∂u_t)
+- K: stiffness converts curvature to moment
+- K*J_u_zc: how actuation creates elastic moment at base
+- -dt*K*J_u_zc: actuation force term in velocity equation
+
+**Implementation**:
+```cpp
+// Extract K and J_u_zc from equilibrium result
+Map<const Matrix3d> K_map(eq_result.K_tip);
+Map<const Matrix<double, 3, Dynamic, RowMajor>> J_u_zc_map(
+    eq_result.J_u_zc, 3, 3*NUM_ACT_SET);
+
+// Compute K * J_u_zc
+MatrixXd K_J_u_zc = K_map * J_u_zc_map;  // 3×3N
+
+// Assemble B (6×3N row-major)
+for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3*NUM_ACT_SET; j++) {
+        B[i * (3*NUM_ACT_SET) + j] = 0.0;                    // top block
+        B[(3+i) * (3*NUM_ACT_SET) + j] = -dt * K_J_u_zc(i, j); // bottom block
+    }
+}
 ```
-B = [0,                    ]  (6×3N)
-    [-dt * ∂f_mag/∂u_t    ]
+
+**Why this enables MPC/iLQR/RL**:
 ```
+∂x_{t+1}/∂u_t = -A^{-1} B ≠ 0
+```
+Control now affects the next state → system is controllable.
 
 ---
 
@@ -350,59 +394,74 @@ std::memcpy(K, eq_result.K_tip, 9 * sizeof(double));
 
 ---
 
-## 5. Newton Solver for x_{t+1}
+## 5. Direct Linear Solve for x_{t+1} (PATCHED - no Newton!)
 
-Solve G(x_{t+1}, x_t, u_t) = 0 using Newton's method:
+**CP2.0 Patch**: The residual is **linear** in x_{t+1}, so we solve directly without iteration:
+
+```
+G = A * x_{t+1} + C * x_t + B * u_t = 0
+
+Rearrange:
+A * x_{t+1} = -C * x_t - B * u_t
+x_{t+1} = -A^{-1} * (C * x_t + B * u_t)
+```
+
+**One FullPivLU solve, no Newton iteration needed.**
 
 ```cpp
-// Initialize: x_{t+1}^{(0)} = x_t (explicit Euler guess)
-double x_next[6];
-std::memcpy(x_next, x_t, 6 * sizeof(double));
+// 1. Compute RHS = -C*x_t - B*u_t
+double rhs[6];
+Map<const Matrix<double, 6, 6, RowMajor>> C_map(C);
+Map<const Matrix<double, 6, Dynamic, RowMajor>> B_map(B, 6, 3*NUM_ACT_SET);
+Map<const VectorXd> x_t_map(x_t, 6);
+Map<const VectorXd> u_t_map(u_t, 3*NUM_ACT_SET);
+Map<VectorXd> rhs_map(rhs, 6);
 
-const int max_iter = 20;
-const double tol = 1e-10;
+rhs_map = -C_map * x_t_map - B_map * u_t_map;
 
-for (int iter = 0; iter < max_iter; iter++) {
-    // Compute residual G(x_next, x_t, u_t)
-    double G[6];
-    compute_residual(x_next, x_t, M, D, K, dt, G);
+// 2. Solve A * x_{t+1} = rhs using FullPivLU
+Map<Matrix<double, 6, 6, RowMajor>> A_map(A);
 
-    double norm_G = 0.0;
-    for (int i = 0; i < 6; i++) norm_G += G[i] * G[i];
-    norm_G = std::sqrt(norm_G);
+FullPivLU<MatrixXd> lu(A_map);
 
-    if (norm_G < tol) {
-        out.nl_iterations = iter;
-        out.final_residual = norm_G;
-        break;
-    }
-
-    // Compute Jacobian A = ∂G/∂x_next
-    double A[36];
-    compute_jacobians(M, D, K, dt, A, nullptr);  // only need A
-
-    // Solve A * delta_x = -G using Eigen FullPivLU
-    Map<Matrix<double, 6, 6, RowMajor>> A_map(A);
-    Map<VectorXd> G_map(G, 6);
-
-    FullPivLU<MatrixXd> lu(A_map);
-    VectorXd delta_x = lu.solve(-G_map);
-
-    // Update x_next
-    for (int i = 0; i < 6; i++) {
-        x_next[i] += delta_x[i];
-    }
+// Check rank
+int rank = lu.rank();
+out.lu_rank = rank;
+if (rank < 6) {
+    return 1;  // Rank-deficient (singular A matrix)
 }
 
-// Check convergence
-if (out.final_residual >= tol) {
-    return 1;  // Failed to converge
+VectorXd x_next_vec = lu.solve(rhs_map);
+
+// 3. Extract solution
+for (int i = 0; i < 6; i++) {
+    out.x_next[i] = x_next_vec[i];
 }
 
-// Copy to output
-std::memcpy(out.x_next, x_next, 6 * sizeof(double));
+// 4. Check solve accuracy (not convergence!)
+VectorXd residual_check = A_map * x_next_vec - rhs_map;
+double residual_norm = residual_check.norm();
+double rhs_norm = rhs_map.norm();
+double rel_res = residual_norm / std::max(rhs_norm, 1.0);
+
+out.solve_residual = residual_norm;
+out.rel_solve_residual = rel_res;
+
+if (rel_res > 1e-10) {
+    return 2;  // Solve inaccurate
+}
+
 out.converged = 0;
+out.exit_code = 0;
+return 0;  // Success
 ```
+
+**Key differences from Newton**:
+- **No iteration**: One solve, always
+- **No convergence check**: Only solve accuracy
+- **Simpler diagnostics**: solve_residual instead of final_residual
+- **Removed**: nl_iterations (always 1 for linear solve)
+- **Faster**: O(n³) one time vs O(k·n³) for k Newton iterations
 
 ---
 
@@ -463,8 +522,9 @@ int main() {
     std::cout << "Forward pass:" << std::endl;
     std::cout << "  status = " << status << std::endl;
     std::cout << "  converged = " << result.converged << std::endl;
-    std::cout << "  nl_iterations = " << result.nl_iterations << std::endl;
-    std::cout << "  final_residual = " << result.final_residual << std::endl;
+    std::cout << "  lu_rank = " << result.lu_rank << std::endl;
+    std::cout << "  solve_residual = " << result.solve_residual << std::endl;
+    std::cout << "  rel_solve_residual = " << result.rel_solve_residual << std::endl;
     std::cout << std::endl;
 
     std::cout << "  x_next = [";
@@ -488,8 +548,13 @@ int main() {
         pass = false;
     }
 
-    if (result.final_residual >= 1e-9) {
-        std::cerr << "FAIL: residual too large" << std::endl;
+    if (result.lu_rank < 6) {
+        std::cerr << "FAIL: rank-deficient A matrix" << std::endl;
+        pass = false;
+    }
+
+    if (result.rel_solve_residual >= 1e-10) {
+        std::cerr << "FAIL: solve residual too large" << std::endl;
         pass = false;
     }
 
@@ -554,7 +619,7 @@ int main() {
 }
 ```
 
-### 6.2 Expected Behavior
+### 6.2 Expected Behavior (PATCHED)
 
 **Input**:
 - x_t = [0, 0, 0, 0, 0, 0] (zero state)
@@ -564,8 +629,9 @@ int main() {
 **Expected output**:
 - status = 0 (success)
 - converged = 0
-- nl_iterations < 5 (should converge in 1-2 iterations for zero input)
-- final_residual < 1e-9
+- lu_rank = 6 (full rank)
+- solve_residual < 1e-10 (solve accuracy, not convergence)
+- rel_solve_residual < 1e-10
 - x_next ≈ [0, 0, 0, 0, 0, 0] (no change for zero input, zero velocity)
 - p_tip ≈ [~0, ~0, 50.0] (from equilibrium at zero curvature)
 
@@ -574,6 +640,18 @@ int main() {
 - lu_rank = 6
 - rel_residual < 1e-10
 - grad_x_t finite and non-zero (identity propagation)
+- **grad_u_t finite** (may be non-zero even for zero input due to B ≠ 0)
+
+**Additional test** (verify control authority):
+```cpp
+// Test: non-zero control should change state
+x_t = [0, 0, 0, 0, 0, 0];
+u_t = [0.1, 0, 0];  // Non-zero actuation
+dt = 0.01;
+
+// Expect: x_next ≠ x_t (specifically, v_{t+1} ≠ 0)
+// This verifies B ≠ 0 and control has effect
+```
 
 ---
 
@@ -634,7 +712,7 @@ cd build
 ctest --output-on-failure -R dynamics_smoke_cp21
 ```
 
-### 8.3 Expected Output
+### 8.3 Expected Output (PATCHED)
 
 ```
 CP2.1 Dynamics Smoke Test
@@ -645,8 +723,9 @@ Test: x_t = [0,0,0,0,0,0], u_t = [0,0,0], dt = 0.01
 Forward pass:
   status = 0
   converged = 0
-  nl_iterations = 1
-  final_residual = 3.2e-15
+  lu_rank = 6
+  solve_residual = 3.2e-15
+  rel_solve_residual = 2.1e-16
 
   x_next = [0, 0, 0, 0, 0, 0]
 
@@ -674,16 +753,18 @@ PASS: Smoke test succeeded
 - [ ] Code compiles without errors
 - [ ] Code links against CRMCPPLib
 
-### Functional Phase
+### Functional Phase (PATCHED)
 - [ ] Smoke test runs without crashes
 - [ ] `dynamics_forward` returns status = 0
-- [ ] Newton solver converges (nl_iterations < 10)
-- [ ] Final residual < 1e-9
+- [ ] Forward solve rank = 6 (full rank A matrix)
+- [ ] Solve residual < 1e-10 (rel_solve_residual < 1e-10)
 - [ ] For zero input, x_next ≈ x_t (within 1e-6)
+- [ ] **For non-zero input (u=[0.1,0,0]), x_next ≠ x_t** (control has effect)
 - [ ] `dynamics_backward` returns status = 0
 - [ ] Backward pass rank = 6 (full rank)
 - [ ] Backward solve residual < 1e-10
 - [ ] grad_x_t is finite and non-zero
+- [ ] **grad_u_t is finite** (may be non-zero even for zero input)
 
 ### Diagnostics Phase
 - [ ] M, D, K matrices are positive definite (diagonal elements > 0)
