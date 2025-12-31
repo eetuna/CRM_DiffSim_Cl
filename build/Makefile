@@ -65,6 +65,16 @@ CMAKE_BINARY_DIR = /workspaces/CRM_DiffSim_Cl/build
 #=============================================================================
 # Targets provided globally by CMake.
 
+# Special rule for the target test
+test:
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running tests..."
+	/usr/bin/ctest --force-new-ctest-process $(ARGS)
+.PHONY : test
+
+# Special rule for the target test
+test/fast: test
+.PHONY : test/fast
+
 # Special rule for the target edit_cache
 edit_cache:
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "No interactive CMake dialog available..."
@@ -206,6 +216,45 @@ test_backward_bug: cmake_check_build_system
 test_backward_bug/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_backward_bug.dir/build.make CMakeFiles/test_backward_bug.dir/build
 .PHONY : test_backward_bug/fast
+
+#=============================================================================
+# Target rules for targets named test_golden_backward
+
+# Build rule for target.
+test_golden_backward: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_golden_backward
+.PHONY : test_golden_backward
+
+# fast build rule for target.
+test_golden_backward/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_golden_backward.dir/build.make CMakeFiles/test_golden_backward.dir/build
+.PHONY : test_golden_backward/fast
+
+#=============================================================================
+# Target rules for targets named test_straight_rod
+
+# Build rule for target.
+test_straight_rod: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_straight_rod
+.PHONY : test_straight_rod
+
+# fast build rule for target.
+test_straight_rod/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_straight_rod.dir/build.make CMakeFiles/test_straight_rod.dir/build
+.PHONY : test_straight_rod/fast
+
+#=============================================================================
+# Target rules for targets named test_cp21_dynamics_smoke
+
+# Build rule for target.
+test_cp21_dynamics_smoke: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_cp21_dynamics_smoke
+.PHONY : test_cp21_dynamics_smoke
+
+# fast build rule for target.
+test_cp21_dynamics_smoke/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp21_dynamics_smoke.dir/build.make CMakeFiles/test_cp21_dynamics_smoke.dir/build
+.PHONY : test_cp21_dynamics_smoke/fast
 
 #=============================================================================
 # Target rules for targets named crm_diff_py
@@ -439,6 +488,36 @@ src/CRM_CatheterClass.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_CatheterClass.cpp.s
 .PHONY : src/CRM_CatheterClass.cpp.s
 
+src/CRM_DiffDynamics.o: src/CRM_DiffDynamics.cpp.o
+.PHONY : src/CRM_DiffDynamics.o
+
+# target to build an object file
+src/CRM_DiffDynamics.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_DiffDynamics.cpp.o
+.PHONY : src/CRM_DiffDynamics.cpp.o
+
+src/CRM_DiffDynamics.i: src/CRM_DiffDynamics.cpp.i
+.PHONY : src/CRM_DiffDynamics.i
+
+# target to preprocess a source file
+src/CRM_DiffDynamics.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_DiffDynamics.cpp.i
+.PHONY : src/CRM_DiffDynamics.cpp.i
+
+src/CRM_DiffDynamics.s: src/CRM_DiffDynamics.cpp.s
+.PHONY : src/CRM_DiffDynamics.s
+
+# target to generate assembly for a file
+src/CRM_DiffDynamics.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_DiffDynamics.cpp.s
+.PHONY : src/CRM_DiffDynamics.cpp.s
+
 src/CRM_DiffEquilibrium.o: src/CRM_DiffEquilibrium.cpp.o
 .PHONY : src/CRM_DiffEquilibrium.o
 
@@ -667,6 +746,54 @@ test_cp15_harness.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp15_harness.dir/build.make CMakeFiles/test_cp15_harness.dir/test_cp15_harness.cpp.s
 .PHONY : test_cp15_harness.cpp.s
 
+test_cp21_dynamics_smoke.o: test_cp21_dynamics_smoke.cpp.o
+.PHONY : test_cp21_dynamics_smoke.o
+
+# target to build an object file
+test_cp21_dynamics_smoke.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp21_dynamics_smoke.dir/build.make CMakeFiles/test_cp21_dynamics_smoke.dir/test_cp21_dynamics_smoke.cpp.o
+.PHONY : test_cp21_dynamics_smoke.cpp.o
+
+test_cp21_dynamics_smoke.i: test_cp21_dynamics_smoke.cpp.i
+.PHONY : test_cp21_dynamics_smoke.i
+
+# target to preprocess a source file
+test_cp21_dynamics_smoke.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp21_dynamics_smoke.dir/build.make CMakeFiles/test_cp21_dynamics_smoke.dir/test_cp21_dynamics_smoke.cpp.i
+.PHONY : test_cp21_dynamics_smoke.cpp.i
+
+test_cp21_dynamics_smoke.s: test_cp21_dynamics_smoke.cpp.s
+.PHONY : test_cp21_dynamics_smoke.s
+
+# target to generate assembly for a file
+test_cp21_dynamics_smoke.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp21_dynamics_smoke.dir/build.make CMakeFiles/test_cp21_dynamics_smoke.dir/test_cp21_dynamics_smoke.cpp.s
+.PHONY : test_cp21_dynamics_smoke.cpp.s
+
+test_golden_backward.o: test_golden_backward.cpp.o
+.PHONY : test_golden_backward.o
+
+# target to build an object file
+test_golden_backward.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_golden_backward.dir/build.make CMakeFiles/test_golden_backward.dir/test_golden_backward.cpp.o
+.PHONY : test_golden_backward.cpp.o
+
+test_golden_backward.i: test_golden_backward.cpp.i
+.PHONY : test_golden_backward.i
+
+# target to preprocess a source file
+test_golden_backward.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_golden_backward.dir/build.make CMakeFiles/test_golden_backward.dir/test_golden_backward.cpp.i
+.PHONY : test_golden_backward.cpp.i
+
+test_golden_backward.s: test_golden_backward.cpp.s
+.PHONY : test_golden_backward.s
+
+# target to generate assembly for a file
+test_golden_backward.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_golden_backward.dir/build.make CMakeFiles/test_golden_backward.dir/test_golden_backward.cpp.s
+.PHONY : test_golden_backward.cpp.s
+
 test_li_sweep.o: test_li_sweep.cpp.o
 .PHONY : test_li_sweep.o
 
@@ -715,6 +842,30 @@ test_physics_audit.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_physics_audit.dir/build.make CMakeFiles/test_physics_audit.dir/test_physics_audit.cpp.s
 .PHONY : test_physics_audit.cpp.s
 
+test_straight_rod.o: test_straight_rod.cpp.o
+.PHONY : test_straight_rod.o
+
+# target to build an object file
+test_straight_rod.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_straight_rod.dir/build.make CMakeFiles/test_straight_rod.dir/test_straight_rod.cpp.o
+.PHONY : test_straight_rod.cpp.o
+
+test_straight_rod.i: test_straight_rod.cpp.i
+.PHONY : test_straight_rod.i
+
+# target to preprocess a source file
+test_straight_rod.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_straight_rod.dir/build.make CMakeFiles/test_straight_rod.dir/test_straight_rod.cpp.i
+.PHONY : test_straight_rod.cpp.i
+
+test_straight_rod.s: test_straight_rod.cpp.s
+.PHONY : test_straight_rod.s
+
+# target to generate assembly for a file
+test_straight_rod.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_straight_rod.dir/build.make CMakeFiles/test_straight_rod.dir/test_straight_rod.cpp.s
+.PHONY : test_straight_rod.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -723,14 +874,18 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... test"
 	@echo "... CRMCPPLib"
 	@echo "... CRMDYNTest"
 	@echo "... CRMTest"
 	@echo "... crm_diff_py"
 	@echo "... test_backward_bug"
 	@echo "... test_cp15_harness"
+	@echo "... test_cp21_dynamics_smoke"
+	@echo "... test_golden_backward"
 	@echo "... test_li_sweep"
 	@echo "... test_physics_audit"
+	@echo "... test_straight_rod"
 	@echo "... main/CRMDYN_test.o"
 	@echo "... main/CRMDYN_test.i"
 	@echo "... main/CRMDYN_test.s"
@@ -755,6 +910,9 @@ help:
 	@echo "... src/CRM_CatheterClass.o"
 	@echo "... src/CRM_CatheterClass.i"
 	@echo "... src/CRM_CatheterClass.s"
+	@echo "... src/CRM_DiffDynamics.o"
+	@echo "... src/CRM_DiffDynamics.i"
+	@echo "... src/CRM_DiffDynamics.s"
 	@echo "... src/CRM_DiffEquilibrium.o"
 	@echo "... src/CRM_DiffEquilibrium.i"
 	@echo "... src/CRM_DiffEquilibrium.s"
@@ -779,12 +937,21 @@ help:
 	@echo "... test_cp15_harness.o"
 	@echo "... test_cp15_harness.i"
 	@echo "... test_cp15_harness.s"
+	@echo "... test_cp21_dynamics_smoke.o"
+	@echo "... test_cp21_dynamics_smoke.i"
+	@echo "... test_cp21_dynamics_smoke.s"
+	@echo "... test_golden_backward.o"
+	@echo "... test_golden_backward.i"
+	@echo "... test_golden_backward.s"
 	@echo "... test_li_sweep.o"
 	@echo "... test_li_sweep.i"
 	@echo "... test_li_sweep.s"
 	@echo "... test_physics_audit.o"
 	@echo "... test_physics_audit.i"
 	@echo "... test_physics_audit.s"
+	@echo "... test_straight_rod.o"
+	@echo "... test_straight_rod.i"
+	@echo "... test_straight_rod.s"
 .PHONY : help
 
 

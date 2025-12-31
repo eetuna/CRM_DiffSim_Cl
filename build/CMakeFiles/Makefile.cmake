@@ -68,5 +68,8 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/test_physics_audit.dir/DependInfo.cmake"
   "CMakeFiles/test_li_sweep.dir/DependInfo.cmake"
   "CMakeFiles/test_backward_bug.dir/DependInfo.cmake"
+  "CMakeFiles/test_golden_backward.dir/DependInfo.cmake"
+  "CMakeFiles/test_straight_rod.dir/DependInfo.cmake"
+  "CMakeFiles/test_cp21_dynamics_smoke.dir/DependInfo.cmake"
   "CMakeFiles/crm_diff_py.dir/DependInfo.cmake"
   )

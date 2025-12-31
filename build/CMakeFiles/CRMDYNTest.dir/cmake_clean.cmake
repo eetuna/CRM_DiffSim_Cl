@@ -11,6 +11,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/CRMDYNTest.dir/src/CRM_BVPSolver.cpp.o.d"
   "CMakeFiles/CRMDYNTest.dir/src/CRM_CatheterClass.cpp.o"
   "CMakeFiles/CRMDYNTest.dir/src/CRM_CatheterClass.cpp.o.d"
+  "CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o"
+  "CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o.d"
   "CMakeFiles/CRMDYNTest.dir/src/CRM_DiffEquilibrium.cpp.o"
   "CMakeFiles/CRMDYNTest.dir/src/CRM_DiffEquilibrium.cpp.o.d"
   "CMakeFiles/CRMDYNTest.dir/src/CRM_ForwardKinematics.cpp.o"

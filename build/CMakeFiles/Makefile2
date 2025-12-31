@@ -70,6 +70,9 @@ all: CMakeFiles/test_cp15_harness.dir/all
 all: CMakeFiles/test_physics_audit.dir/all
 all: CMakeFiles/test_li_sweep.dir/all
 all: CMakeFiles/test_backward_bug.dir/all
+all: CMakeFiles/test_golden_backward.dir/all
+all: CMakeFiles/test_straight_rod.dir/all
+all: CMakeFiles/test_cp21_dynamics_smoke.dir/all
 all: CMakeFiles/crm_diff_py.dir/all
 .PHONY : all
 
@@ -85,6 +88,9 @@ clean: CMakeFiles/test_cp15_harness.dir/clean
 clean: CMakeFiles/test_physics_audit.dir/clean
 clean: CMakeFiles/test_li_sweep.dir/clean
 clean: CMakeFiles/test_backward_bug.dir/clean
+clean: CMakeFiles/test_golden_backward.dir/clean
+clean: CMakeFiles/test_straight_rod.dir/clean
+clean: CMakeFiles/test_cp21_dynamics_smoke.dir/clean
 clean: CMakeFiles/crm_diff_py.dir/clean
 .PHONY : clean
 
@@ -95,12 +101,12 @@ clean: CMakeFiles/crm_diff_py.dir/clean
 CMakeFiles/CRMCPPLib.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11 "Built target CRMCPPLib"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11,12 "Built target CRMCPPLib"
 .PHONY : CMakeFiles/CRMCPPLib.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/CRMCPPLib.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 11
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 12
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/CRMCPPLib.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/CRMCPPLib.dir/rule
@@ -121,12 +127,12 @@ CMakeFiles/CRMCPPLib.dir/clean:
 CMakeFiles/CRMDYNTest.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=12,13,14,15,16,17,18,19,20,21,22,23,24 "Built target CRMDYNTest"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=13,14,15,16,17,18,19,20,21,22,23,24,25,26 "Built target CRMDYNTest"
 .PHONY : CMakeFiles/CRMDYNTest.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/CRMDYNTest.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/CRMDYNTest.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/CRMDYNTest.dir/rule
@@ -147,12 +153,12 @@ CMakeFiles/CRMDYNTest.dir/clean:
 CMakeFiles/CRMTest.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=25,26,27,28,29,30,31,32,33,34,35,36,37 "Built target CRMTest"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=27,28,29,30,31,32,33,34,35,36,37,38,39,40 "Built target CRMTest"
 .PHONY : CMakeFiles/CRMTest.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/CRMTest.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/CRMTest.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/CRMTest.dir/rule
@@ -173,12 +179,12 @@ CMakeFiles/CRMTest.dir/clean:
 CMakeFiles/test_cp15_harness.dir/all: CMakeFiles/CRMCPPLib.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp15_harness.dir/build.make CMakeFiles/test_cp15_harness.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp15_harness.dir/build.make CMakeFiles/test_cp15_harness.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=42,43 "Built target test_cp15_harness"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=45,46 "Built target test_cp15_harness"
 .PHONY : CMakeFiles/test_cp15_harness.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/test_cp15_harness.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_cp15_harness.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/test_cp15_harness.dir/rule
@@ -199,12 +205,12 @@ CMakeFiles/test_cp15_harness.dir/clean:
 CMakeFiles/test_physics_audit.dir/all: CMakeFiles/CRMCPPLib.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_physics_audit.dir/build.make CMakeFiles/test_physics_audit.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_physics_audit.dir/build.make CMakeFiles/test_physics_audit.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=46,47 "Built target test_physics_audit"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=53,54 "Built target test_physics_audit"
 .PHONY : CMakeFiles/test_physics_audit.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/test_physics_audit.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_physics_audit.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/test_physics_audit.dir/rule
@@ -225,12 +231,12 @@ CMakeFiles/test_physics_audit.dir/clean:
 CMakeFiles/test_li_sweep.dir/all: CMakeFiles/CRMCPPLib.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_li_sweep.dir/build.make CMakeFiles/test_li_sweep.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_li_sweep.dir/build.make CMakeFiles/test_li_sweep.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=44,45 "Built target test_li_sweep"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=51,52 "Built target test_li_sweep"
 .PHONY : CMakeFiles/test_li_sweep.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/test_li_sweep.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_li_sweep.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/test_li_sweep.dir/rule
@@ -251,12 +257,12 @@ CMakeFiles/test_li_sweep.dir/clean:
 CMakeFiles/test_backward_bug.dir/all: CMakeFiles/CRMCPPLib.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_backward_bug.dir/build.make CMakeFiles/test_backward_bug.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_backward_bug.dir/build.make CMakeFiles/test_backward_bug.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=40,41 "Built target test_backward_bug"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=43,44 "Built target test_backward_bug"
 .PHONY : CMakeFiles/test_backward_bug.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/test_backward_bug.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_backward_bug.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/test_backward_bug.dir/rule
@@ -271,18 +277,96 @@ CMakeFiles/test_backward_bug.dir/clean:
 .PHONY : CMakeFiles/test_backward_bug.dir/clean
 
 #=============================================================================
+# Target rules for target CMakeFiles/test_golden_backward.dir
+
+# All Build rule for target.
+CMakeFiles/test_golden_backward.dir/all: CMakeFiles/CRMCPPLib.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_golden_backward.dir/build.make CMakeFiles/test_golden_backward.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_golden_backward.dir/build.make CMakeFiles/test_golden_backward.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=49,50 "Built target test_golden_backward"
+.PHONY : CMakeFiles/test_golden_backward.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/test_golden_backward.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_golden_backward.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
+.PHONY : CMakeFiles/test_golden_backward.dir/rule
+
+# Convenience name for target.
+test_golden_backward: CMakeFiles/test_golden_backward.dir/rule
+.PHONY : test_golden_backward
+
+# clean rule for target.
+CMakeFiles/test_golden_backward.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_golden_backward.dir/build.make CMakeFiles/test_golden_backward.dir/clean
+.PHONY : CMakeFiles/test_golden_backward.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/test_straight_rod.dir
+
+# All Build rule for target.
+CMakeFiles/test_straight_rod.dir/all: CMakeFiles/CRMCPPLib.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_straight_rod.dir/build.make CMakeFiles/test_straight_rod.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_straight_rod.dir/build.make CMakeFiles/test_straight_rod.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=55,56 "Built target test_straight_rod"
+.PHONY : CMakeFiles/test_straight_rod.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/test_straight_rod.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_straight_rod.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
+.PHONY : CMakeFiles/test_straight_rod.dir/rule
+
+# Convenience name for target.
+test_straight_rod: CMakeFiles/test_straight_rod.dir/rule
+.PHONY : test_straight_rod
+
+# clean rule for target.
+CMakeFiles/test_straight_rod.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_straight_rod.dir/build.make CMakeFiles/test_straight_rod.dir/clean
+.PHONY : CMakeFiles/test_straight_rod.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/test_cp21_dynamics_smoke.dir
+
+# All Build rule for target.
+CMakeFiles/test_cp21_dynamics_smoke.dir/all: CMakeFiles/CRMCPPLib.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp21_dynamics_smoke.dir/build.make CMakeFiles/test_cp21_dynamics_smoke.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp21_dynamics_smoke.dir/build.make CMakeFiles/test_cp21_dynamics_smoke.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=47,48 "Built target test_cp21_dynamics_smoke"
+.PHONY : CMakeFiles/test_cp21_dynamics_smoke.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/test_cp21_dynamics_smoke.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_cp21_dynamics_smoke.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
+.PHONY : CMakeFiles/test_cp21_dynamics_smoke.dir/rule
+
+# Convenience name for target.
+test_cp21_dynamics_smoke: CMakeFiles/test_cp21_dynamics_smoke.dir/rule
+.PHONY : test_cp21_dynamics_smoke
+
+# clean rule for target.
+CMakeFiles/test_cp21_dynamics_smoke.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp21_dynamics_smoke.dir/build.make CMakeFiles/test_cp21_dynamics_smoke.dir/clean
+.PHONY : CMakeFiles/test_cp21_dynamics_smoke.dir/clean
+
+#=============================================================================
 # Target rules for target CMakeFiles/crm_diff_py.dir
 
 # All Build rule for target.
 CMakeFiles/crm_diff_py.dir/all: CMakeFiles/CRMCPPLib.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/crm_diff_py.dir/build.make CMakeFiles/crm_diff_py.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/crm_diff_py.dir/build.make CMakeFiles/crm_diff_py.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=38,39 "Built target crm_diff_py"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=41,42 "Built target crm_diff_py"
 .PHONY : CMakeFiles/crm_diff_py.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/crm_diff_py.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/crm_diff_py.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/CRM_DiffSim_Cl/build/CMakeFiles 0
 .PHONY : CMakeFiles/crm_diff_py.dir/rule

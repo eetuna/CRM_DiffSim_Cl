@@ -195,10 +195,24 @@ CMakeFiles/CRMDYNTest.dir/src/CRM_DiffEquilibrium.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/CRMDYNTest.dir/src/CRM_DiffEquilibrium.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/CRM_DiffSim_Cl/src/CRM_DiffEquilibrium.cpp -o CMakeFiles/CRMDYNTest.dir/src/CRM_DiffEquilibrium.cpp.s
 
+CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o: CMakeFiles/CRMDYNTest.dir/flags.make
+CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o: ../src/CRM_DiffDynamics.cpp
+CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o: CMakeFiles/CRMDYNTest.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o -MF CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o.d -o CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o -c /workspaces/CRM_DiffSim_Cl/src/CRM_DiffDynamics.cpp
+
+CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /workspaces/CRM_DiffSim_Cl/src/CRM_DiffDynamics.cpp > CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.i
+
+CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/CRM_DiffSim_Cl/src/CRM_DiffDynamics.cpp -o CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.s
+
 CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o: CMakeFiles/CRMDYNTest.dir/flags.make
 CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o: ../numerical/minpack.cpp
 CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o: CMakeFiles/CRMDYNTest.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o -MF CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o.d -o CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o -c /workspaces/CRM_DiffSim_Cl/numerical/minpack.cpp
 
 CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.i: cmake_force
@@ -212,7 +226,7 @@ CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.s: cmake_force
 CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o: CMakeFiles/CRMDYNTest.dir/flags.make
 CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o: ../numerical/minpack_DYN_Defs.cpp
 CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o: CMakeFiles/CRMDYNTest.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o -MF CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o.d -o CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o -c /workspaces/CRM_DiffSim_Cl/numerical/minpack_DYN_Defs.cpp
 
 CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.i: cmake_force
@@ -226,7 +240,7 @@ CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.s: cmake_force
 CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o: CMakeFiles/CRMDYNTest.dir/flags.make
 CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o: ../src/CoilDynamics_Defs.cpp
 CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o: CMakeFiles/CRMDYNTest.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o -MF CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o.d -o CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o -c /workspaces/CRM_DiffSim_Cl/src/CoilDynamics_Defs.cpp
 
 CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.i: cmake_force
@@ -248,6 +262,7 @@ CRMDYNTest_OBJECTS = \
 "CMakeFiles/CRMDYNTest.dir/src/CRM_CatheterClass.cpp.o" \
 "CMakeFiles/CRMDYNTest.dir/src/CRM_SupportFunctions.cpp.o" \
 "CMakeFiles/CRMDYNTest.dir/src/CRM_DiffEquilibrium.cpp.o" \
+"CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o" \
 "CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o" \
 "CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o" \
 "CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o"
@@ -264,12 +279,13 @@ CRMDYNTest: CMakeFiles/CRMDYNTest.dir/src/CRM_ForwardKinematics.cpp.o
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/src/CRM_CatheterClass.cpp.o
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/src/CRM_SupportFunctions.cpp.o
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/src/CRM_DiffEquilibrium.cpp.o
+CRMDYNTest: CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/build.make
 CRMDYNTest: CMakeFiles/CRMDYNTest.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Linking CXX executable CRMDYNTest"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Linking CXX executable CRMDYNTest"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/CRMDYNTest.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
