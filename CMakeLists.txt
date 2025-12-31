@@ -152,6 +152,19 @@ target_include_directories(test_backward_bug PUBLIC
     "${PROJECT_SOURCE_DIR}/numerical"
 )
 
+add_executable(test_golden_backward
+    test_golden_backward.cpp
+)
+
+target_link_libraries(test_golden_backward PUBLIC
+    CRMCPPLib
+)
+
+target_include_directories(test_golden_backward PUBLIC
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/numerical"
+)
+
 # Python bindings (optional, requires pybind11)
 if(pybind11_FOUND)
     pybind11_add_module(crm_diff_py
@@ -160,3 +173,25 @@ if(pybind11_FOUND)
     target_link_libraries(crm_diff_py PRIVATE CRMCPPLib)
     target_compile_definitions(crm_diff_py PRIVATE VERSION_INFO="1.0.0")
 endif()
+
+# Enable CTest
+enable_testing()
+
+# PHASE A: Golden C++ backward test (CP1.4)
+add_test(NAME golden_backward
+         COMMAND test_golden_backward
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# PHASE B: C++ <-> Python smoke gate (CP1.5)
+# Requires pybind11 module to be built
+if(pybind11_FOUND)
+    add_test(NAME cpp_python_smoke
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp15_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
+
+# C++ reference harness (used by Python smoke test)
+add_test(NAME cpp_reference_harness
+         COMMAND test_cp15_harness
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
