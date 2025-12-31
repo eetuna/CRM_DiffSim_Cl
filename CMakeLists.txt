@@ -259,3 +259,11 @@ if(pybind11_FOUND)
                      python3 ${CMAKE_SOURCE_DIR}/python/test_cp23_dynamics_smoke.py
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
+
+# CP2.4: Dynamics PyTorch autograd gradcheck validation
+if(pybind11_FOUND)
+    add_test(NAME dynamics_gradcheck_cp24_python
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp24_dynamics_gradcheck.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()

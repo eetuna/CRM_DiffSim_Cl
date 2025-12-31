@@ -223,14 +223,18 @@ py::dict py_dynamics_forward(
     py::dict out;
     out["status"] = status;
 
-    // Return x_next (6,)
-    auto x_next_arr = py::array_t<double>({6});
+    // Return x_next (6,) with explicit strides
+    std::vector<ssize_t> shape_xnext = {6};
+    std::vector<ssize_t> strides_xnext = {sizeof(double)};
+    auto x_next_arr = py::array_t<double>(shape_xnext, strides_xnext);
     std::memcpy(x_next_arr.mutable_data(), result.x_next, 6 * sizeof(double));
     out["x_next"] = x_next_arr;
 
-    // Return observables
-    auto p_tip_arr = py::array_t<double>({3});
-    auto u_tip_arr = py::array_t<double>({3});
+    // Return observables with explicit strides
+    std::vector<ssize_t> shape_3 = {3};
+    std::vector<ssize_t> strides_3 = {sizeof(double)};
+    auto p_tip_arr = py::array_t<double>(shape_3, strides_3);
+    auto u_tip_arr = py::array_t<double>(shape_3, strides_3);
     std::memcpy(p_tip_arr.mutable_data(), result.p_tip, 3 * sizeof(double));
     std::memcpy(u_tip_arr.mutable_data(), result.u_tip, 3 * sizeof(double));
     out["p_tip"] = p_tip_arr;
@@ -273,7 +277,9 @@ py::dict py_dynamics_forward(
     out["K"] = K_arr;
 
     // Return cached inputs for backward pass matrix-dependence
-    auto u_t_cached_arr = py::array_t<double>({NUM_ACT_SET * 3});
+    std::vector<ssize_t> shape_u_cached = {NUM_ACT_SET * 3};
+    std::vector<ssize_t> strides_u_cached = {sizeof(double)};
+    auto u_t_cached_arr = py::array_t<double>(shape_u_cached, strides_u_cached);
     std::memcpy(u_t_cached_arr.mutable_data(), result.u_t_cached, NUM_ACT_SET * 3 * sizeof(double));
     out["u_t_cached"] = u_t_cached_arr;
 
@@ -398,11 +404,23 @@ py::dict py_dynamics_backward(
 
     int status = dynamics_backward(cached, grad_x_next, fk_params, grad_x_t, grad_u_t, &lu_rank, &rel_residual);
 
-    // Copy gradients to properly allocated arrays
-    auto grad_x_t_arr = py::array_t<double>({6});
-    auto grad_u_t_arr = py::array_t<double>({NUM_ACT_SET * 3});
+    // DEBUG: Print what C++ returned (disabled)
+    // std::cout << "DEBUG dynamics_backward: grad_x_t = [";
+    // for (int i = 0; i < 6; i++) {
+    //     std::cout << grad_x_t[i];
+    //     if (i < 5) std::cout << ", ";
+    // }
+    // std::cout << "]" << std::endl;
 
+    // Copy gradients to properly allocated arrays with explicit strides
+    std::vector<ssize_t> shape_x = {6};
+    std::vector<ssize_t> strides_x = {sizeof(double)};
+    auto grad_x_t_arr = py::array_t<double>(shape_x, strides_x);
     std::memcpy(grad_x_t_arr.mutable_data(), grad_x_t, 6 * sizeof(double));
+
+    std::vector<ssize_t> shape_u = {NUM_ACT_SET * 3};
+    std::vector<ssize_t> strides_u = {sizeof(double)};
+    auto grad_u_t_arr = py::array_t<double>(shape_u, strides_u);
     std::memcpy(grad_u_t_arr.mutable_data(), grad_u_t, NUM_ACT_SET * 3 * sizeof(double));
 
     py::dict out;
