@@ -1,6 +1,6 @@
 # CP2.2 Dynamics Finite Difference Validation Report
 
-**Status: FAIL**
+**Status: PASS (after fix)**
 **Date: 2025-12-31**
 **Checkpoint: CP2.2**
 
@@ -10,13 +10,17 @@
 
 CP2.2 implements finite difference validation for the dynamics primitive `dynamics_forward` and `dynamics_backward` introduced in CP2.1. The test validates analytical gradients (computed via backward mode) against finite differences at three operating points.
 
-**Result**: The test **FAILS** for actuated operating points (OP2, OP3) with ~14% relative error in ∂x_next/∂u_t gradients.
+**Initial Result**: The test **FAILED** for actuated operating points (OP2, OP3) with ~14% relative error in ∂x_next/∂u_t gradients.
 
-**Root Cause**: The `dynamics_backward` implementation computes an **incomplete gradient**. It correctly handles the direct dependency ∂G/∂u_t = B, but omits the fact that the system matrices A(u) and B(u) themselves depend on the control input u through:
+**Root Cause Identified**: The `dynamics_backward` implementation computed an **incomplete gradient**. It correctly handled the direct dependency ∂G/∂u_t = B, but omitted the fact that the system matrices A(u) and B(u) themselves depend on the control input u through:
 - K_tip(u): Tip stiffness varies with actuation
 - J_u_zc(u): Equilibrium Jacobian varies with actuation
 
-**Important Note**: The CP2.1 dynamics forward implementation is **not wrong** — it correctly solves the physics. The backward pass is simply incomplete relative to the full dependency chain in the forward function being differentiated.
+**Fix Implemented**: Updated `dynamics_backward` to include matrix-dependence terms via finite-differenced ∂A/∂u and ∂B/∂u.
+
+**Final Result**: **PASS** — All three operating points now validate with rel_err_u < 3.5e-06 (well below 1e-4 threshold).
+
+**Important Note**: The CP2.1 dynamics forward implementation was **not wrong** — it correctly solved the physics. The backward pass was simply incomplete relative to the full dependency chain in the forward function being differentiated.
 
 ---
 
@@ -216,13 +220,12 @@ This will make the backward pass **complete** relative to the forward function, 
 ---
 
 ## Files Modified
-- `test_cp22_dynamics_fd.cpp` (new test file)
+- `src/CRM_DiffDynamics.hpp` (added cache fields for matrix-dependence)
+- `src/CRM_DiffDynamics.cpp` (fixed backward implementation with FD ∂A/∂u, ∂B/∂u)
+- `test_cp22_dynamics_fd.cpp` (new FD validation test)
+- `test_cp21_dynamics_smoke.cpp` (updated backward call signature)
 - `CMakeLists.txt` (added test target and CTest entry)
-
-## Files NOT Modified (Yet)
-- `src/CRM_DiffDynamics.hpp` (will need cache fields added)
-- `src/CRM_DiffDynamics.cpp` (backward implementation needs fix)
 
 ---
 
-**Report Status**: Documents initial FAIL state before implementing fix.
+**Report Status**: Documents initial failure, root cause analysis, and successful fix. CP2.2 now PASSES.
