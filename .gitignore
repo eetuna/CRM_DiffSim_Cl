@@ -1,0 +1,151 @@
+# ============================================================
+# CRM_ML Project .gitignore
+# ============================================================
+
+# Build artifacts
+build/
+build_py/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.eggs/
+*.egg-info/
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Compiled Python bindings
+crm_ml_rl/wrappers/*.so
+crm_ml_rl/wrappers/*.pyd
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE / Editor
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# MATLAB
+*.asv
+*.m~
+*.mex*
+!Mexfiles/*.mexa64
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+*.bak
+
+# Data files (keep structure but not large data)
+*.mat
+!data/simulation_parameters/*.mat
+*.pkl
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Trained models (too large for git)
+trained_models/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+
+# Output data
+data/output/
+results/
+
+# Environment files with secrets
+.env
+.env.local
+*.env
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# Package managers
+node_modules/
+package-lock.json
+yarn.lock
+
+# Documentation build
+docs/_build/
+site/
+
+# Coverage reports
+.coverage
+coverage.xml
+*.cover
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Distribution / packaging
+dist/
+*.whl
+
+# Profiling
+*.prof
+*.lprof
+
+# Image and data files
+*.png
+*.json
+*.zip
+
+# Git worktree
+.worktrees/
+
+# Vendor deps (kept local unless explicitly vendored/submodule)
+third_party/autodiff/
+
+

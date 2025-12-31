@@ -7,6 +7,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/CRMCPPLib.dir/src/CRM_BVPSolver.cpp.o.d"
   "CMakeFiles/CRMCPPLib.dir/src/CRM_CatheterClass.cpp.o"
   "CMakeFiles/CRMCPPLib.dir/src/CRM_CatheterClass.cpp.o.d"
+  "CMakeFiles/CRMCPPLib.dir/src/CRM_DiffEquilibrium.cpp.o"
+  "CMakeFiles/CRMCPPLib.dir/src/CRM_DiffEquilibrium.cpp.o.d"
   "CMakeFiles/CRMCPPLib.dir/src/CRM_ForwardKinematics.cpp.o"
   "CMakeFiles/CRMCPPLib.dir/src/CRM_ForwardKinematics.cpp.o.d"
   "CMakeFiles/CRMCPPLib.dir/src/CRM_IVPJacobian.cpp.o"

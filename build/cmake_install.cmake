@@ -1,4 +1,4 @@
-# Install script for directory: /home/ranhao/Documents/CRM_Dynamics
+# Install script for directory: /workspaces/CRM_DiffSim_Cl
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -50,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/ranhao/Documents/CRM_Dynamics/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/workspaces/CRM_DiffSim_Cl/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

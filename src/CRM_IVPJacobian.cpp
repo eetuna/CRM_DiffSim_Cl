@@ -3,6 +3,7 @@
 #include "CRM_IVP_NumericalIntegrationTemplates.hpp"
 #include "CRM_IVPJacobian.hpp"
 #include "CRM_IVPJacobian_InternalAPI.hpp"
+#include <iostream>
 
 using Eigen::Matrix;
 using Eigen::RowMajor;
@@ -88,13 +89,51 @@ namespace CRMCatheterModel {
 		// for debugging
 		//std::cout << "---- x_N ---- \n" << x_N << std::endl;
 
-		MatrixXd JIVP_u_u0_pinv = JIVP_u_u0.completeOrthogonalDecomposition().pseudoInverse();
-		MatrixXd JBVP_p_z = JIVP_p_z - JIVP_p_u0 * JIVP_u_u0_pinv * JIVP_u_z;
-		MatrixXd JBVP_ws_z = JIVP_ws_z - JIVP_ws_u0 * JIVP_u_u0_pinv * JIVP_u_z;
+		// PATCH (CP1.3): Replace pseudoinverse with LU solve
+		// Solve JIVP_u_u0 * X = RHS using FullPivLU
+		Eigen::FullPivLU<Matrix3d> lu_u_u0(JIVP_u_u0);
+		if (lu_u_u0.rank() < 3) {
+			std::cerr << "ERROR: JIVP_u_u0 rank-deficient, rank=" << lu_u_u0.rank() << std::endl;
+			// Fail-fast: return zero Jacobians
+			MatrixXd zero_pz = MatrixXd::Zero(3, Cs + 1);
+			MatrixXd zero_wsz = MatrixXd::Zero(3, Cs + 1);
+			MatrixXd zero_pft = MatrixXd::Zero(3, 3);
+			MatrixXd zero_wsft = MatrixXd::Zero(3, 3);
+			MatrixXd zero_ftz = MatrixXd::Zero(3, Cs + 1);
+			return { zero_pz, zero_wsz, zero_pft, zero_wsft, zero_ftz };
+		}
 
-		MatrixXd JBVP_p_ft = JIVP_p_ft - JIVP_p_u0 * JIVP_u_u0_pinv * JIVP_u_ft;
-		MatrixXd JBVP_ws_ft = JIVP_ws_ft - JIVP_ws_u0 * JIVP_u_u0_pinv * JIVP_u_ft;
-		MatrixXd Jft_z = -JBVP_p_ft.completeOrthogonalDecomposition().pseudoInverse() * JBVP_p_z;  // Is this the best option in Eigen ???
+		// Solve JIVP_u_u0 * X_z = JIVP_u_z
+		Matrix<double, 3, Cs + 1, RowMajor> X_z = lu_u_u0.solve(JIVP_u_z);
+		double resid_z = (JIVP_u_u0 * X_z - JIVP_u_z).norm();
+		double rel_resid_z = resid_z / std::max(JIVP_u_z.norm(), 1.0);
+		if (rel_resid_z > 1e-10) {
+			std::cerr << "WARNING: JIVP_u_u0 solve residual=" << rel_resid_z << std::endl;
+		}
+
+		// Solve JIVP_u_u0 * X_ft = JIVP_u_ft
+		Matrix3d X_ft = lu_u_u0.solve(JIVP_u_ft);
+		double resid_ft = (JIVP_u_u0 * X_ft - JIVP_u_ft).norm();
+		double rel_resid_ft = resid_ft / std::max(JIVP_u_ft.norm(), 1.0);
+		if (rel_resid_ft > 1e-10) {
+			std::cerr << "WARNING: JIVP_u_u0 solve residual(ft)=" << rel_resid_ft << std::endl;
+		}
+
+		// Compute BVP Jacobians
+		MatrixXd JBVP_p_z = JIVP_p_z - JIVP_p_u0 * X_z;
+		MatrixXd JBVP_ws_z = JIVP_ws_z - JIVP_ws_u0 * X_z;
+		MatrixXd JBVP_p_ft = JIVP_p_ft - JIVP_p_u0 * X_ft;
+		MatrixXd JBVP_ws_ft = JIVP_ws_ft - JIVP_ws_u0 * X_ft;
+
+		// For FIXED_TIP: solve JBVP_p_ft * Jft_z = -JBVP_p_z
+		Eigen::FullPivLU<Matrix3d> lu_p_ft(JBVP_p_ft);
+		MatrixXd Jft_z;
+		if (lu_p_ft.rank() < 3) {
+			std::cerr << "WARNING: JBVP_p_ft rank-deficient, rank=" << lu_p_ft.rank() << std::endl;
+			Jft_z = MatrixXd::Zero(3, Cs + 1);
+		} else {
+			Jft_z = lu_p_ft.solve(-JBVP_p_z);
+		}
 
 		return { JBVP_p_z, JBVP_ws_z, JBVP_p_ft, JBVP_ws_ft, Jft_z };
 	}
