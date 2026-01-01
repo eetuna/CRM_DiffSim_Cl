@@ -298,6 +298,15 @@ if(pybind11_FOUND)
     set_tests_properties(dynamics_robustness_sweep_p1_1 PROPERTIES TIMEOUT 120)
 endif()
 
+# P1-5: API Versioning validation
+if(pybind11_FOUND)
+    add_test(NAME api_versioning_p1_5
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_p1_5_api_versioning.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(api_versioning_p1_5 PROPERTIES TIMEOUT 5)
+endif()
+
 # CP3.1: Linearization validation (C++)
 add_test(NAME test_cp31_linearization_cpp
          COMMAND test_cp31_linearization

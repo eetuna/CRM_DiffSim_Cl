@@ -8,6 +8,12 @@
 namespace py = pybind11;
 using namespace CRMCatheterModel;
 
+// P1-5: API Versioning
+static const char* CRM_PACKAGE_VERSION = "1.0.0";
+static const char* CRM_API_VERSION = "1.1.0";
+static const char* CRM_API_CONTRACT_EQUILIBRIUM = "equilibrium_v1_1";
+static const char* CRM_API_CONTRACT_DYNAMICS = "dynamics_v1_1";
+
 // Helper: convert Python dict to CRMForwardKinematicsData
 CRMForwardKinematicsData parse_fk_params(py::dict params_dict) {
     CRMForwardKinematicsData fk_params;
@@ -116,6 +122,10 @@ py::dict py_equilibrium_forward(
     out["rel_solve_residual"] = result.rel_solve_residual;
     out["exit_code"] = result.exit_code;
 
+    // P1-5: API Versioning
+    out["api_version"] = CRM_API_VERSION;
+    out["api_contract"] = CRM_API_CONTRACT_EQUILIBRIUM;
+
     return out;
 }
 
@@ -185,6 +195,10 @@ py::dict py_equilibrium_backward(
     out["grad_u"] = grad_u_arr;
     out["lu_rank"] = lu_rank;
     out["rel_residual"] = rel_residual;
+
+    // P1-5: API Versioning
+    out["api_version"] = CRM_API_VERSION;
+    out["api_contract"] = CRM_API_CONTRACT_EQUILIBRIUM;
 
     return out;
 }
@@ -301,6 +315,10 @@ py::dict py_dynamics_forward(
     out["solve_residual"] = result.solve_residual;
     out["converged"] = result.converged;
     out["exit_code"] = result.exit_code;
+
+    // P1-5: API Versioning
+    out["api_version"] = CRM_API_VERSION;
+    out["api_contract"] = CRM_API_CONTRACT_DYNAMICS;
 
     return out;
 }
@@ -430,6 +448,10 @@ py::dict py_dynamics_backward(
     out["lu_rank"] = lu_rank;
     out["rel_residual"] = rel_residual;
 
+    // P1-5: API Versioning
+    out["api_version"] = CRM_API_VERSION;
+    out["api_contract"] = CRM_API_CONTRACT_DYNAMICS;
+
     return out;
 }
 
@@ -445,8 +467,55 @@ CatheterConfiguration* py_load_cath_config(const std::string& filepath) {
     return new CatheterConfiguration(config);  // Use copy constructor
 }
 
+// P1-5: API Versioning - compatibility check helper
+bool check_api_compat(const std::string& required_version) {
+    std::string current(CRM_API_VERSION);
+
+    // Simple semantic versioning check: major.minor.patch
+    // Compatible if major version matches and current >= required
+    auto parse_version = [](const std::string& v) -> std::tuple<int, int, int> {
+        int major = 0, minor = 0, patch = 0;
+        std::sscanf(v.c_str(), "%d.%d.%d", &major, &minor, &patch);
+        return {major, minor, patch};
+    };
+
+    auto [cur_major, cur_minor, cur_patch] = parse_version(current);
+    auto [req_major, req_minor, req_patch] = parse_version(required_version);
+
+    // Major version must match (breaking changes)
+    if (cur_major != req_major) {
+        throw std::runtime_error(
+            "API major version mismatch: current=" + current +
+            ", required=" + required_version +
+            ". This indicates a breaking API change."
+        );
+    }
+
+    // Current minor/patch must be >= required (backward compatible)
+    if (cur_minor < req_minor || (cur_minor == req_minor && cur_patch < req_patch)) {
+        throw std::runtime_error(
+            "API version too old: current=" + current +
+            ", required=" + required_version +
+            ". Please update crm_diff_py."
+        );
+    }
+
+    return true;
+}
+
 PYBIND11_MODULE(crm_diff_py, m) {
     m.doc() = "CRM Differentiable Simulator Python Bindings (CP2.3)";
+
+    // P1-5: API Versioning - expose version constants
+    m.attr("__version__") = CRM_PACKAGE_VERSION;
+    m.attr("__api_version__") = CRM_API_VERSION;
+
+    // P1-5: API Versioning - expose compatibility check
+    m.def("check_api_compat", &check_api_compat,
+          py::arg("required_version"),
+          "Check if the current API version is compatible with the required version.\n"
+          "Raises RuntimeError if incompatible.\n"
+          "Compatible if major version matches and current >= required.");
 
     // Expose ContactModeType enum
     py::enum_<ContactModeType>(m, "ContactModeType")
