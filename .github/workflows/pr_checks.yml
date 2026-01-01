@@ -29,7 +29,7 @@ jobs:
     - name: Build
       run: |
         cd build
-        make -j$(nproc) CRMCPPLib test_golden_backward test_cp15_harness crm_diff_py
+        make -j$(nproc) CRMCPPLib test_golden_backward test_cp15_harness test_cp31_linearization crm_diff_py
 
     - name: Run Golden Backward Test (PHASE A)
       run: |
@@ -55,6 +55,13 @@ jobs:
       env:
         PYTHONPATH: ${{ github.workspace }}/build
 
+    - name: Run CP3.1 Linearization Fast Gate
+      run: |
+        cd build
+        ctest --output-on-failure -R "test_cp31_linearization_cpp|dynamics_linearization_cp31_python"
+      env:
+        PYTHONPATH: ${{ github.workspace }}/build:${{ github.workspace }}/python
+
     - name: Upload test logs on failure
       if: failure()
       uses: actions/upload-artifact@v3
@@ -71,3 +78,4 @@ jobs:
         echo "  - Golden backward test: PASS"
         echo "  - C++ <-> Python smoke gate: PASS"
         echo "  - CP2.x dynamics fast gate (CP2.1-CP2.3): PASS"
+        echo "  - CP3.1 linearization fast gate (C++ + Python): PASS"

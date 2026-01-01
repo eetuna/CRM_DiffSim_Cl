@@ -29,7 +29,7 @@ jobs:
     - name: Build
       run: |
         cd build
-        make -j$(nproc) CRMCPPLib test_straight_rod test_li_sweep crm_diff_py
+        make -j$(nproc) CRMCPPLib test_straight_rod test_li_sweep test_cp31_linearization crm_diff_py
 
     - name: Run Straight-Rod Physics Tests (PHASE C)
       run: |
@@ -59,10 +59,10 @@ jobs:
           li_sweep_*.csv
         retention-days: 30
 
-    - name: Run CP2.x Dynamics Full Suite (CP2.1-CP2.5)
+    - name: Run CP2.x Dynamics Full Suite (CP2.1-CP2.5 + P1-1)
       run: |
         cd build
-        ctest --output-on-failure -R "dynamics_smoke_cp21|dynamics_fd_cp22|dynamics_smoke_cp23_python|dynamics_gradcheck_cp24_python|dynamics_rollout_cp25_python"
+        ctest --output-on-failure -R "dynamics_smoke_cp21|dynamics_fd_cp22|dynamics_smoke_cp23_python|dynamics_gradcheck_cp24_python|dynamics_rollout_cp25_python|dynamics_robustness_sweep_p1_1"
       env:
         PYTHONPATH: ${{ github.workspace }}/build
 
@@ -76,10 +76,30 @@ jobs:
           build/Testing/Temporary/*.log
         retention-days: 7
 
+    - name: Run CP3.x Control Full Suite (CP3.1-CP3.3)
+      run: |
+        cd build
+        ctest --output-on-failure -R "test_cp31_linearization_cpp|dynamics_linearization_cp31_python|ilqr_fixed_target_cp32_python|ilqr_descent_regression_cp32_python|mpc_tracking_cp33_python"
+      env:
+        PYTHONPATH: ${{ github.workspace }}/build:${{ github.workspace }}/python
+
+    - name: Upload CP3.x test logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: nightly-cp3-test-logs
+        path: |
+          build/Testing/Temporary/LastTest.log
+          build/Testing/Temporary/*.log
+          cp32_ilqr_diagnostics.png
+          cp33_mpc_tracking.png
+        retention-days: 7
+
     - name: Summary
       if: success()
       run: |
         echo "✓ All nightly tests passed"
         echo "  - Straight-rod physics: PASS"
         echo "  - Li sweep baseline: PASS"
-        echo "  - CP2.x dynamics full suite (CP2.1-CP2.5): PASS"
+        echo "  - CP2.x dynamics full suite (CP2.1-CP2.5 + P1-1 robustness): PASS"
+        echo "  - CP3.x control full suite (CP3.1-CP3.3): PASS"

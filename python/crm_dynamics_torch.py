@@ -46,9 +46,9 @@ class DynamicsStep(torch.autograd.Function):
         if u_t.dtype != torch.float64:
             raise ValueError(f"u_t must be float64, got {u_t.dtype}")
 
-        # Convert to numpy (make copies to ensure contiguity and safety)
-        x_t_np = x_t.detach().cpu().numpy().copy()
-        u_t_np = u_t.detach().cpu().numpy().copy()
+        # Convert to numpy (ensure contiguity, copy only if needed)
+        x_t_np = np.ascontiguousarray(x_t.detach().cpu().numpy())
+        u_t_np = np.ascontiguousarray(u_t.detach().cpu().numpy())
 
         # Call C++ forward
         result = crm_diff_py.dynamics_forward(x_t_np, u_t_np, dt, L_inserted, params_dict)
@@ -59,9 +59,9 @@ class DynamicsStep(torch.autograd.Function):
                 f"(rank={result['lu_rank']}, exit_code={result['exit_code']})"
             )
 
-        # Extract x_next and convert to torch
-        x_next_np = result['x_next'].copy()  # Copy to own the memory
-        x_next = torch.from_numpy(x_next_np)
+        # Extract x_next and convert to torch (C++ returns owned array, no copy needed)
+        # Use torch.from_numpy which creates a view, but result dict owns the memory
+        x_next = torch.from_numpy(result['x_next']).clone()  # Clone to avoid aliasing issues
 
         # Cache full forward result and params_dict for backward
         ctx.save_for_backward(x_t, u_t)
@@ -93,8 +93,8 @@ class DynamicsStep(torch.autograd.Function):
         if grad_x_next.shape != (6,):
             raise ValueError(f"grad_x_next must have shape (6,), got {grad_x_next.shape}")
 
-        # Convert to numpy (make copy for safety)
-        grad_x_next_np = grad_x_next.detach().cpu().numpy().copy()
+        # Convert to numpy (ensure contiguity, copy only if needed)
+        grad_x_next_np = np.ascontiguousarray(grad_x_next.detach().cpu().numpy())
 
         # Call C++ backward
         bwd_result = crm_diff_py.dynamics_backward(fwd_result, grad_x_next_np, params_dict)
@@ -105,12 +105,9 @@ class DynamicsStep(torch.autograd.Function):
                 f"(rank={bwd_result['lu_rank']}, residual={bwd_result['rel_residual']:.2e})"
             )
 
-        # Extract gradients and convert to torch
-        grad_x_t_np = bwd_result['grad_x_t'].copy()
-        grad_u_t_np = bwd_result['grad_u_t'].copy()
-
-        grad_x_t = torch.from_numpy(grad_x_t_np)
-        grad_u_t = torch.from_numpy(grad_u_t_np)
+        # Extract gradients and convert to torch (C++ returns owned arrays)
+        grad_x_t = torch.from_numpy(bwd_result['grad_x_t']).clone()
+        grad_u_t = torch.from_numpy(bwd_result['grad_u_t']).clone()
 
         # Return gradients for (x_t, u_t, dt, L_inserted, params_dict)
         # Only x_t and u_t have gradients; others return None

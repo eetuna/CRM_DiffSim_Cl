@@ -270,6 +270,19 @@ test_cp22_dynamics_fd/fast:
 .PHONY : test_cp22_dynamics_fd/fast
 
 #=============================================================================
+# Target rules for targets named test_cp31_linearization
+
+# Build rule for target.
+test_cp31_linearization: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_cp31_linearization
+.PHONY : test_cp31_linearization
+
+# fast build rule for target.
+test_cp31_linearization/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp31_linearization.dir/build.make CMakeFiles/test_cp31_linearization.dir/build
+.PHONY : test_cp31_linearization/fast
+
+#=============================================================================
 # Target rules for targets named crm_diff_py
 
 # Build rule for target.
@@ -807,6 +820,30 @@ test_cp22_dynamics_fd.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp22_dynamics_fd.dir/build.make CMakeFiles/test_cp22_dynamics_fd.dir/test_cp22_dynamics_fd.cpp.s
 .PHONY : test_cp22_dynamics_fd.cpp.s
 
+test_cp31_linearization.o: test_cp31_linearization.cpp.o
+.PHONY : test_cp31_linearization.o
+
+# target to build an object file
+test_cp31_linearization.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp31_linearization.dir/build.make CMakeFiles/test_cp31_linearization.dir/test_cp31_linearization.cpp.o
+.PHONY : test_cp31_linearization.cpp.o
+
+test_cp31_linearization.i: test_cp31_linearization.cpp.i
+.PHONY : test_cp31_linearization.i
+
+# target to preprocess a source file
+test_cp31_linearization.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp31_linearization.dir/build.make CMakeFiles/test_cp31_linearization.dir/test_cp31_linearization.cpp.i
+.PHONY : test_cp31_linearization.cpp.i
+
+test_cp31_linearization.s: test_cp31_linearization.cpp.s
+.PHONY : test_cp31_linearization.s
+
+# target to generate assembly for a file
+test_cp31_linearization.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cp31_linearization.dir/build.make CMakeFiles/test_cp31_linearization.dir/test_cp31_linearization.cpp.s
+.PHONY : test_cp31_linearization.cpp.s
+
 test_golden_backward.o: test_golden_backward.cpp.o
 .PHONY : test_golden_backward.o
 
@@ -920,6 +957,7 @@ help:
 	@echo "... test_cp15_harness"
 	@echo "... test_cp21_dynamics_smoke"
 	@echo "... test_cp22_dynamics_fd"
+	@echo "... test_cp31_linearization"
 	@echo "... test_golden_backward"
 	@echo "... test_li_sweep"
 	@echo "... test_physics_audit"
@@ -981,6 +1019,9 @@ help:
 	@echo "... test_cp22_dynamics_fd.o"
 	@echo "... test_cp22_dynamics_fd.i"
 	@echo "... test_cp22_dynamics_fd.s"
+	@echo "... test_cp31_linearization.o"
+	@echo "... test_cp31_linearization.i"
+	@echo "... test_cp31_linearization.s"
 	@echo "... test_golden_backward.o"
 	@echo "... test_golden_backward.i"
 	@echo "... test_golden_backward.s"

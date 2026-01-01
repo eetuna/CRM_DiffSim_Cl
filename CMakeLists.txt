@@ -206,6 +206,19 @@ target_include_directories(test_cp22_dynamics_fd PUBLIC
     "${PROJECT_SOURCE_DIR}/numerical"
 )
 
+add_executable(test_cp31_linearization
+    test_cp31_linearization.cpp
+)
+
+target_link_libraries(test_cp31_linearization PUBLIC
+    CRMCPPLib
+)
+
+target_include_directories(test_cp31_linearization PUBLIC
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/numerical"
+)
+
 # Python bindings (optional, requires pybind11)
 if(pybind11_FOUND)
     pybind11_add_module(crm_diff_py
@@ -274,4 +287,62 @@ if(pybind11_FOUND)
              COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:$ENV{PYTHONPATH}
                      python3 ${CMAKE_SOURCE_DIR}/python/test_cp25_dynamics_rollout_smoke.py
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
+
+# P1-1: Robustness sweep stress test (randomized operating points)
+if(pybind11_FOUND)
+    add_test(NAME dynamics_robustness_sweep_p1_1
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_p1_1_robustness_sweep.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(dynamics_robustness_sweep_p1_1 PROPERTIES TIMEOUT 120)
+endif()
+
+# CP3.1: Linearization validation (C++)
+add_test(NAME test_cp31_linearization_cpp
+         COMMAND test_cp31_linearization
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# CP3.1: Linearization validation (Python + PyTorch)
+if(pybind11_FOUND)
+    add_test(NAME dynamics_linearization_cp31_python
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp31_linearization.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
+
+# CP3.2: iLQR trajectory optimization to fixed target
+if(pybind11_FOUND)
+    add_test(NAME ilqr_fixed_target_cp32_python
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp32_ilqr_fixed_target.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(ilqr_fixed_target_cp32_python PROPERTIES TIMEOUT 120)
+endif()
+
+# CP3.2.1: iLQR descent regression test
+if(pybind11_FOUND)
+    add_test(NAME ilqr_descent_regression_cp32_python
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp32_ilqr_descent_regression.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(ilqr_descent_regression_cp32_python PROPERTIES TIMEOUT 60)
+endif()
+
+# CP3.3: MPC receding-horizon tracking
+if(pybind11_FOUND)
+    add_test(NAME mpc_tracking_cp33_python
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp33_mpc_tracking.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(mpc_tracking_cp33_python PROPERTIES TIMEOUT 300)
+endif()
+
+# P1-3: Terminal Hessian improvement regression test (nightly-only, not in fast gate)
+if(pybind11_FOUND)
+    add_test(NAME terminal_hessian_improves_descent_p1_3
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_p1_3_terminal_hessian_improves_descent.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(terminal_hessian_improves_descent_p1_3 PROPERTIES TIMEOUT 180)
 endif()

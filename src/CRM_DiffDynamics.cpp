@@ -282,14 +282,23 @@ int dynamics_backward(
 
     double eps = 1e-6;  // Finite difference epsilon
 
+    // Pre-allocate arrays outside loop to reduce allocations
+    double u_pert[3*NUM_ACT_SET];
+    EquilibriumResult eq_pert;
+    double M_pert[9], D_pert[9];
+    double A_pert[36], C_pert[36], B_pert[6*NUM_ACT_SET*3];
+
+    // Pre-allocate Eigen matrices for FD computations (reuse across iterations)
+    Matrix<double, 6, 6> dA_du_i;
+    Matrix<double, 6, Dynamic> dB_du_i(6, 3*NUM_ACT_SET);
+    VectorXd dr_du_i(6);
+
     for (int i = 0; i < 3*NUM_ACT_SET; i++) {
-        // Perturb u_t[i]
-        double u_pert[3*NUM_ACT_SET];
+        // Perturb u_t[i] (copy base values once per iteration)
         std::memcpy(u_pert, fwd_result.u_t_cached, 3*NUM_ACT_SET * sizeof(double));
         u_pert[i] += eps;
 
         // Call equilibrium_forward with perturbed u
-        EquilibriumResult eq_pert;
         std::memset(&eq_pert, 0, sizeof(EquilibriumResult));
         int eq_status = equilibrium_forward(u_pert, fwd_result.L_inserted_cached, params, eq_pert);
 
@@ -298,23 +307,21 @@ int dynamics_backward(
         }
 
         // Compute M, D from K_tip_pert
-        double M_pert[9], D_pert[9];
         compute_physics_matrices(*(params.CathParams), eq_pert.K_tip, M_pert, D_pert);
 
         // Compute A_pert, B_pert
-        double A_pert[36], C_pert[36], B_pert[6*NUM_ACT_SET*3];
         compute_jacobians(M_pert, D_pert, eq_pert.K_tip, eq_pert.J_u_zc,
                          fwd_result.dt_cached, A_pert, C_pert, B_pert);
 
-        // Compute dA/du_i and dB/du_i via finite differences
-        Map<Matrix<double, 6, 6, RowMajor>> A_pert_map(A_pert);
-        Map<Matrix<double, 6, Dynamic, RowMajor>> B_pert_map(B_pert, 6, 3*NUM_ACT_SET);
+        // Compute dA/du_i and dB/du_i via finite differences (use maps, avoid copies)
+        Map<const Matrix<double, 6, 6, RowMajor>> A_pert_map(A_pert);
+        Map<const Matrix<double, 6, Dynamic, RowMajor>> B_pert_map(B_pert, 6, 3*NUM_ACT_SET);
 
-        MatrixXd dA_du_i = (A_pert_map - A_map) / eps;  // 6x6
-        MatrixXd dB_du_i = (B_pert_map - B_map) / eps;  // 6x3
+        dA_du_i.noalias() = (A_pert_map - A_map) / eps;  // 6x6
+        dB_du_i.noalias() = (B_pert_map - B_map) / eps;  // 6x(3*NUM_ACT_SET)
 
         // Compute dr/du_i = dA/du_i * x_next + dB/du_i * u_t + B[:,i]
-        VectorXd dr_du_i = dA_du_i * x_next_map + dB_du_i * u_t_map + B_map.col(i);
+        dr_du_i.noalias() = dA_du_i * x_next_map + dB_du_i * u_t_map + B_map.col(i);
 
         // grad_u[i] = -(dr/du_i)^T * lambda
         grad_ut(i) = -dr_du_i.dot(lambda);
