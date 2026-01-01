@@ -1,0 +1,10 @@
+# Minimal Python deps for v1.0 autograd + gradcheck/FD harness
+numpy>=1.21.0
+scipy>=1.7.0
+pytest>=7.0.0
+
+# CPU-only PyTorch
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+
+matplotlib>=3.7.0

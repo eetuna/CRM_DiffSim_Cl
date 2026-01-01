@@ -183,8 +183,8 @@ def main():
     config_file = "./catheterdata/CatheterSpatialConfiguration_1.txt"
     params_dict = load_default_catheter_params(param_file, config_file)
 
-    dt = 0.01
-    L_inserted = 50.0
+    dt = 0.01  # s
+    L_inserted = 50.0  # mm (explicit, not from dataset)
 
     # Operating points
     x_op1 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])

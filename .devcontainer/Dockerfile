@@ -24,6 +24,7 @@ RUN apt-get update \
     gdb \
     clang \
     lldb \
+    ripgrep \
   && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 (NodeSource)

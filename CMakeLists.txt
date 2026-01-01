@@ -355,3 +355,12 @@ if(pybind11_FOUND)
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     set_tests_properties(terminal_hessian_improves_descent_p1_3 PROPERTIES TIMEOUT 180)
 endif()
+
+# CP3.5: Dataset-driven NPZ trajectory replay regression test (nightly-only, not in fast gate)
+if(pybind11_FOUND)
+    add_test(NAME replay_npz_tracking_cp35
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp35_replay_npz_tracking.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(replay_npz_tracking_cp35 PROPERTIES TIMEOUT 180)
+endif()
