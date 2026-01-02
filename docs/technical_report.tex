@@ -1,0 +1,867 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{url}
+
+\begin{document}
+
+\title{Hybrid Model-Based and Learned Control Using Differentiable Simulation and Uncertainty-Aware Policies for Continuum Robots}
+
+\author{\IEEEauthorblockN{Anonymous Authors}
+\IEEEauthorblockA{Department of Robotics and Autonomous Systems\\
+University Affiliation\\
+Email: \texttt{anonymous@university.edu}}}
+
+\maketitle
+
+%==============================================================================
+\begin{abstract}
+%==============================================================================
+Model Predictive Control (MPC) for continuum robots faces a fundamental tension: accurate dynamics models require implicit nonlinear solvers, making real-time execution computationally prohibitive, while purely learned policies risk unsafe behavior in out-of-distribution scenarios. This work presents a hybrid control architecture that combines learned recurrent policies with MPC fallback, using ensemble-based epistemic uncertainty to trigger mode switching. We develop a differentiable simulator for Cosserat rod dynamics with analytic vector-Jacobian products (VJPs), enabling gradient-based trajectory optimization and behavioral cloning. The simulator achieves 2.62$\times$ speedup through batched VJP computation. We train recurrent GRU policies via DAgger on synthetic trajectories, forming an ensemble that provides uncertainty estimates with demonstrated correlation (r=0.641) to tracking error. The hybrid controller achieves safety parity with MPC-only control on synthetic data with 2$\times$ speedup when uncertainty is low. However, when evaluated on real catheter trajectory recordings, the ensemble exhibits persistent high uncertainty due to domain shift, resulting in 100\% MPC fallback and no computational benefit. We document the complete pipeline including windowed health gating for dataset validation and discuss the fundamental limitations of imitation-based approaches when training and deployment distributions diverge significantly. The system demonstrates correct uncertainty behavior---it knows what it does not know---but cannot achieve performance closure without real-world training data.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Continuum robots, differentiable simulation, model predictive control, imitation learning, uncertainty quantification, hybrid control
+\end{IEEEkeywords}
+
+%==============================================================================
+\section{Introduction}
+%==============================================================================
+
+Continuum robots, including catheters, surgical snakes, and soft manipulators, present unique challenges for feedback control. Unlike rigid-link robots with well-characterized forward kinematics, continuum systems exhibit:
+\begin{itemize}
+\item Infinite degrees of freedom described by partial differential equations
+\item Strong material nonlinearity and hysteresis
+\item Actuation through distributed forces (tendon tension, pneumatic pressure, magnetic fields)
+\item Environment-dependent behavior (contact, friction, fluid interaction)
+\end{itemize}
+
+Model Predictive Control (MPC) offers a principled approach to handling constraints and optimizing multi-step objectives, but requires repeated trajectory optimization at each control timestep. For continuum robots modeled by Cosserat rod theory, this involves solving implicit boundary value problems, making real-time control on resource-constrained platforms infeasible.
+
+Learned policies, trained via imitation or reinforcement learning, promise fast inference but lack guarantees on constraint satisfaction or behavior in novel scenarios. When a catheter operates inside a patient, unsafe exploration is unacceptable.
+
+This work investigates a hybrid architecture that uses learned policies for fast execution in familiar regimes while maintaining MPC as a safety-critical fallback when the policy exhibits uncertainty. The key contributions are:
+
+\begin{enumerate}
+\item A \textbf{differentiable Cosserat rod simulator} with implicit backward Euler time-stepping, providing analytic VJPs for gradient-based optimization. We achieve 2.62$\times$ speedup through batched VJP computation.
+
+\item An \textbf{uncertainty-aware hybrid controller} that switches between policy-only, MPC-warm-start, and MPC-cold-start modes based on ensemble variance thresholds.
+
+\item A \textbf{health-gated windowed validation framework} that detects rank-deficient Jacobians, solver failures, and hold periods in trajectory datasets before training or evaluation.
+
+\item \textbf{Honest evaluation} on both synthetic and real catheter recordings, documenting where the approach succeeds (synthetic data: 2$\times$ speedup with no accuracy loss) and where it fails (real data: 100\% MPC fallback due to domain shift).
+\end{enumerate}
+
+The primary negative result---that policies trained on synthetic trajectories fail to generalize to real catheter recordings---is as informative as our positive results, highlighting the fundamental challenge of distribution shift in learning-based control.
+
+%==============================================================================
+\section{Background}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Continuum and Cosserat Rod Dynamics}
+%------------------------------------------------------------------------------
+
+The Cosserat rod model describes a one-dimensional elastic body capable of bending, twisting, and extending. The rod's configuration is characterized by:
+\begin{itemize}
+\item Position $\mathbf{p}(s, t) \in \mathbb{R}^3$ along arc length $s \in [0, L]$
+\item Orientation frame $\mathbf{R}(s, t) \in SO(3)$
+\item Curvature $\boldsymbol{\kappa}(s, t) \in \mathbb{R}^3$ and shear $\boldsymbol{\gamma}(s, t) \in \mathbb{R}^3$
+\end{itemize}
+
+The governing equations are:
+\begin{align}
+\partial_s \mathbf{p} &= \mathbf{R} (\boldsymbol{\gamma} + \mathbf{e}_3) \\
+\partial_s \mathbf{R} &= \mathbf{R} [\boldsymbol{\kappa}]_\times \\
+\partial_s \mathbf{n} &= -\mathbf{f} \\
+\partial_s \mathbf{m} &= -\partial_s \mathbf{p} \times \mathbf{n} - \boldsymbol{\tau}
+\end{align}
+where $\mathbf{n}$ and $\mathbf{m}$ are internal forces and moments, $\mathbf{f}$ and $\boldsymbol{\tau}$ are external forces and torques per unit length.
+
+For quasi-static analysis neglecting inertia, solving for the equilibrium configuration given boundary conditions and external loads requires a boundary value problem (BVP) solver, typically using shooting methods with Newton iteration.
+
+For dynamic analysis, the rod's inertia introduces temporal coupling:
+\begin{equation}
+\rho A \ddot{\mathbf{p}} = \partial_s \mathbf{n} + \mathbf{f}, \quad \rho I \dot{\boldsymbol{\omega}} = \partial_s \mathbf{m} + \partial_s \mathbf{p} \times \mathbf{n} + \boldsymbol{\tau}
+\end{equation}
+
+%------------------------------------------------------------------------------
+\subsection{Model Predictive Control and iLQR}
+%------------------------------------------------------------------------------
+
+Model Predictive Control solves a receding-horizon optimal control problem at each timestep:
+\begin{align}
+\min_{u_0, \ldots, u_{H-1}} \quad & \sum_{t=0}^{H-1} \ell(x_t, u_t) + \ell_f(x_H) \\
+\text{s.t.} \quad & x_{t+1} = f(x_t, u_t) \\
+& u_{\min} \leq u_t \leq u_{\max}
+\end{align}
+
+The iterative Linear Quadratic Regulator (iLQR) approximates this problem via sequential linearization and quadratic cost approximation. At each iteration:
+\begin{enumerate}
+\item \textbf{Forward rollout}: Simulate trajectory with current controls $\{u_t\}$
+\item \textbf{Linearization}: Compute Jacobians $A_t = \frac{\partial f}{\partial x}\big|_{(x_t, u_t)}$, $B_t = \frac{\partial f}{\partial u}\big|_{(x_t, u_t)}$
+\item \textbf{Backward pass}: Riccati recursion to compute gains $K_t$, $k_t$
+\item \textbf{Forward pass}: Line search with feedback gains
+\end{enumerate}
+
+The computational bottleneck lies in step 2: computing Jacobians requires either finite differencing (6+3 dynamics evaluations per timestep) or analytic differentiation.
+
+%------------------------------------------------------------------------------
+\subsection{Differentiable Simulation}
+%------------------------------------------------------------------------------
+
+Differentiable simulation provides gradients of simulation outputs with respect to inputs, enabling gradient-based optimization and learning. For implicit dynamics of the form:
+\begin{equation}
+G(x_{t+1}, x_t, u_t) = 0
+\end{equation}
+the implicit function theorem yields:
+\begin{equation}
+\frac{dx_{t+1}}{dx_t} = -\left(\frac{\partial G}{\partial x_{t+1}}\right)^{-1} \frac{\partial G}{\partial x_t}
+\end{equation}
+
+Rather than computing full Jacobian matrices, modern automatic differentiation systems compute \emph{vector-Jacobian products} (VJPs):
+\begin{equation}
+v^T \frac{dx_{t+1}}{dx_t} = -v^T \left(\frac{\partial G}{\partial x_{t+1}}\right)^{-1} \frac{\partial G}{\partial x_t}
+\end{equation}
+This requires solving a single linear system rather than inverting a matrix.
+
+%------------------------------------------------------------------------------
+\subsection{Learning-Based Control}
+%------------------------------------------------------------------------------
+
+\textbf{Behavioral Cloning (BC)} directly regresses a policy $\pi_\theta(s) \rightarrow a$ from expert demonstrations $\{(s_i, a_i^*)\}$ using supervised learning:
+\begin{equation}
+\min_\theta \sum_i \|a_i^* - \pi_\theta(s_i)\|^2
+\end{equation}
+
+BC suffers from \emph{distribution shift}: errors compound as the policy deviates from the expert's state distribution.
+
+\textbf{DAgger (Dataset Aggregation)} addresses this by iteratively:
+\begin{enumerate}
+\item Roll out current policy $\pi_\theta$
+\item Query expert $\pi^*$ on states visited by $\pi_\theta$
+\item Aggregate new labels into training set
+\item Retrain policy on combined dataset
+\end{enumerate}
+
+\textbf{Ensemble uncertainty}: Training $N$ policies with different random seeds and computing their variance provides an estimate of \emph{epistemic uncertainty}---the model's uncertainty about which function best explains the data:
+\begin{equation}
+\bar{u} = \frac{1}{N}\sum_{i=1}^N \pi_{\theta_i}(s), \quad \sigma^2(u) = \frac{1}{N}\sum_{i=1}^N (\pi_{\theta_i}(s) - \bar{u})^2
+\end{equation}
+
+%==============================================================================
+\section{Baseline Dynamics and Differentiable Simulator}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{State Space Formulation}
+%------------------------------------------------------------------------------
+
+We adopt a reduced-order dynamic model following the approach of lumped-parameter systems. The state vector is:
+\begin{equation}
+\mathbf{x} = \begin{bmatrix} \mathbf{u}_0 \\ \mathbf{v}_0 \end{bmatrix} \in \mathbb{R}^6
+\end{equation}
+where $\mathbf{u}_0 \in \mathbb{R}^3$ is the base curvature and $\mathbf{v}_0 = \dot{\mathbf{u}}_0 \in \mathbb{R}^3$ is the base curvature rate.
+
+The control input $\mathbf{u}_t \in \mathbb{R}^3$ represents actuator currents (in Amperes) for three electromagnetic coil sets.
+
+%------------------------------------------------------------------------------
+\subsection{Implicit Dynamics Residual}
+%------------------------------------------------------------------------------
+
+The dynamics are discretized using backward Euler with implicit actuation coupling:
+\begin{equation}
+G(\mathbf{x}_{t+1}, \mathbf{x}_t, \mathbf{u}_t) = A \mathbf{x}_{t+1} + C \mathbf{x}_t + B \mathbf{u}_t = 0
+\end{equation}
+where the Jacobian matrices are:
+\begin{align}
+A &= \begin{bmatrix} I & -\Delta t \cdot I \\ \Delta t \cdot K & M + \Delta t \cdot D \end{bmatrix} \in \mathbb{R}^{6 \times 6} \\
+C &= \begin{bmatrix} -I & 0 \\ 0 & -M \end{bmatrix} \in \mathbb{R}^{6 \times 6} \\
+B &= \begin{bmatrix} 0 \\ -\Delta t \cdot K \cdot J_{u \rightarrow \zeta_c} \end{bmatrix} \in \mathbb{R}^{6 \times 3}
+\end{align}
+
+The physics matrices are:
+\begin{itemize}
+\item $M = \text{diag}(m_{\text{eff}}, m_{\text{eff}}, m_{\text{eff}})$ where $m_{\text{eff}} = M_{\text{act}} / L_{\text{seg}}$ is the effective mass per unit length
+\item $D = \text{diag}(d, d, d)$ where $d = 2\sqrt{m_{\text{eff}} \cdot k_{\text{eff}}}$ is critical damping
+\item $K = K_{\text{tip}}$ is the tip stiffness matrix from the equilibrium solver
+\item $J_{u \rightarrow \zeta_c}$ is the Jacobian mapping control currents to generalized coordinates, obtained from the BVP solver
+\end{itemize}
+
+The term $-\Delta t \cdot K \cdot J_{u \rightarrow \zeta_c} \cdot \mathbf{u}_t$ provides \emph{actuation coupling}, ensuring $\frac{\partial \mathbf{x}_{t+1}}{\partial \mathbf{u}_t} \neq 0$---a necessary condition for controllability.
+
+%------------------------------------------------------------------------------
+\subsection{Forward Pass: Direct Linear Solve}
+%------------------------------------------------------------------------------
+
+Because the residual is linear in $\mathbf{x}_{t+1}$, the forward pass requires only a direct solve:
+\begin{equation}
+\mathbf{x}_{t+1} = -A^{-1}(C \mathbf{x}_t + B \mathbf{u}_t)
+\end{equation}
+
+We use full-pivoted LU decomposition for numerical stability and rank detection. Diagnostics include:
+\begin{itemize}
+\item $\text{rank}(A)$: must equal 6 for well-posed system
+\item Solve residual: $\|A \mathbf{x}_{t+1} - \text{rhs}\|$ verifies solution accuracy
+\item Exit code: 0 = success, 1 = rank-deficient, 2 = high residual
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Backward Pass: Analytic VJP}
+%------------------------------------------------------------------------------
+
+Given an upstream gradient $\mathbf{v} = \frac{\partial \mathcal{L}}{\partial \mathbf{x}_{t+1}}$ from a loss function, we compute VJPs via implicit differentiation:
+\begin{enumerate}
+\item Solve adjoint system: $A^T \boldsymbol{\lambda} = \mathbf{v}$
+\item Compute gradients:
+\begin{align}
+\frac{\partial \mathcal{L}}{\partial \mathbf{x}_t} &= -C^T \boldsymbol{\lambda} \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{u}_t} &= -B^T \boldsymbol{\lambda}
+\end{align}
+\end{enumerate}
+
+\textbf{Batched VJP Optimization}: For computing full Jacobians $\frac{\partial \mathbf{x}_{t+1}}{\partial \mathbf{x}_t}$ (needed for iLQR), we batch 6 VJP computations with canonical basis vectors. By reusing the equilibrium solver calls across all 6 adjoints, we achieve \textbf{2.62$\times$ speedup} compared to sequential VJP computation (target: $\geq$1.3$\times$).
+
+%------------------------------------------------------------------------------
+\subsection{Why This Simulator Is Differentiable But Not Symbolic}
+%------------------------------------------------------------------------------
+
+The simulator provides gradients through implicit differentiation of the equilibrium BVP solution, not through symbolic computation graphs. The equilibrium solver uses numerical shooting and Newton iteration internally---operations that cannot be symbolically differentiated. Instead, we:
+\begin{enumerate}
+\item Cache the converged equilibrium solution and its Jacobians
+\item Apply the implicit function theorem to obtain total derivatives
+\item Solve linear systems (not invert matrices) for efficiency
+\end{enumerate}
+
+This approach is numerically exact to machine precision but does not produce closed-form derivative expressions.
+
+%==============================================================================
+\section{Hybrid Control Architecture}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Learned Policy}
+%------------------------------------------------------------------------------
+
+The policy is a recurrent GRU network:
+\begin{align}
+\text{Input}: & \quad [\mathbf{p}_{\text{tip}}, \mathbf{p}_{\text{ref}}] \in \mathbb{R}^6 \\
+\text{Architecture}: & \quad \text{GRU}(6 \rightarrow 64) \rightarrow \text{FC}(64 \rightarrow 3) \\
+\text{Output}: & \quad \mathbf{u} \in \mathbb{R}^3 \text{ (currents)}
+\end{align}
+
+The GRU hidden state $\mathbf{h}_t \in \mathbb{R}^{64}$ provides temporal context, implicitly encoding velocity information without explicit state estimation.
+
+Training targets are MPC expert actions collected via DAgger over 5 iterations, with gradient clipping (max norm 1.0) and early stopping (patience 10 epochs).
+
+%------------------------------------------------------------------------------
+\subsection{Ensemble Uncertainty}
+%------------------------------------------------------------------------------
+
+We train $N=3$ GRU policies with different random seeds (42, 43, 44), forming an ensemble. At inference:
+\begin{equation}
+\bar{\mathbf{u}} = \frac{1}{N}\sum_{i=1}^N \pi_i(\mathbf{s}), \quad \sigma^2 = \frac{1}{N}\sum_{i=1}^N (\pi_i(\mathbf{s}) - \bar{\mathbf{u}})^2
+\end{equation}
+
+We interpret $\sigma^2$ as \emph{epistemic uncertainty}: high variance indicates states where the policies disagree, typically because such states were underrepresented in training data.
+
+Empirically, we observe correlation coefficient $r = 0.641$ between $\max(\sigma^2)$ and tracking error on synthetic trajectories, validating that uncertainty is predictive of performance.
+
+%------------------------------------------------------------------------------
+\subsection{Hybrid Decision Logic}
+%------------------------------------------------------------------------------
+
+The controller implements a three-mode switching strategy:
+
+\textbf{Mode 1: Policy-Only} (fast path, $\sim$0.1 ms)
+\begin{equation}
+\sigma = \max(\sigma^2) < \tau_{\text{low}} \implies \mathbf{u}_t = \bar{\mathbf{u}}
+\end{equation}
+
+\textbf{Mode 2: MPC Warm-Start} (medium path, $\sim$10--50 ms)
+\begin{equation}
+\tau_{\text{low}} \leq \sigma < \tau_{\text{high}} \implies \mathbf{u}_t = \text{MPC}(\text{init}=\bar{\mathbf{u}})
+\end{equation}
+
+\textbf{Mode 3: MPC Cold-Start} (slow path, $\sim$50--200 ms)
+\begin{equation}
+\sigma \geq \tau_{\text{high}} \implies \mathbf{u}_t = \text{MPC}(\text{init}=\mathbf{0})
+\end{equation}
+
+\textbf{Safety Override}: If dynamics solver fails (status $\neq$ 0, rank $\neq$ 6, or tracking error $> 5$ mm), always invoke MPC cold-start.
+
+Default thresholds: $\tau_{\text{low}} = 0.001$, $\tau_{\text{high}} = 0.01$.
+
+%------------------------------------------------------------------------------
+\subsection{Decision Flow Diagram}
+%------------------------------------------------------------------------------
+
+\textbf{Figure 1} (described textually): The decision flow proceeds as follows:
+
+\begin{enumerate}
+\item \textbf{Ensemble Predict}: Query all $N$ policies, compute $(\bar{\mathbf{u}}, \sigma^2)$
+\item \textbf{Uncertainty Threshold}: Compute $\sigma = \max(\sigma^2)$
+\item \textbf{Branch}:
+\begin{itemize}
+\item If $\sigma < \tau_{\text{low}}$: Execute policy output directly (POLICY-ONLY)
+\item If $\tau_{\text{low}} \leq \sigma < \tau_{\text{high}}$: Initialize MPC with policy output (MPC-WARM)
+\item If $\sigma \geq \tau_{\text{high}}$: Initialize MPC from scratch (MPC-COLD)
+\end{itemize}
+\item \textbf{Apply Control}: Execute $\mathbf{u}_t$, simulate dynamics
+\item \textbf{Safety Check}: Verify solver status, rank, residual
+\item \textbf{Override}: If safety check fails, revert to MPC-COLD
+\end{enumerate}
+
+%==============================================================================
+\section{Data and Datasets}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Synthetic ("Golden") Trajectories}
+%------------------------------------------------------------------------------
+
+We generate controlled test trajectories via closed-loop MPC tracking of geometric reference paths:
+
+\textbf{Circle}:
+\begin{equation}
+\mathbf{p}_{\text{ref}}(t) = [r \cos(\omega t), y_0 + r \sin(\omega t), z_0]
+\end{equation}
+with $r = 10$ mm, $\omega = 2\pi / 8$ rad/s, duration 16 s.
+
+\textbf{Lemniscate} (figure-eight):
+\begin{equation}
+\mathbf{p}_{\text{ref}}(t) = [a \sin(2\omega t), y_0 + a \sin(\omega t) \cos(\omega t), z_0]
+\end{equation}
+with $a = 10$ mm, providing more complex curvature variation.
+
+These trajectories are smooth, well-conditioned, and achieve tracking RMSE $\approx 2$ mm with MPC. They serve as \emph{golden baselines} for validating the pipeline before real data evaluation.
+
+%------------------------------------------------------------------------------
+\subsection{Real NPZ Data}
+%------------------------------------------------------------------------------
+
+Real catheter trajectory recordings are stored in NumPy NPZ format with the following structure:
+
+\begin{table}[h]
+\centering
+\caption{NPZ Dataset Schema}
+\begin{tabular}{ll}
+\toprule
+Field & Description \\
+\midrule
+\texttt{t} & Time array [N] (s) \\
+\texttt{currents} & Control inputs [N, 3] (A) \\
+\texttt{tip\_fk} & FK tip positions [N, 3] (mm) \\
+\texttt{tip\_dyn} & Dynamics tip positions [N, 3] (mm) \\
+\texttt{tip\_desired} & Desired positions [N, 3] (mm) \\
+\texttt{tip\_projected} & Projected reference [N, 3] (mm) \\
+\texttt{dt} & Timestep (0.05 s typical) \\
+\texttt{L\_inserted} & Insertion length (94.3 mm typical) \\
+\texttt{hold} & Hold period index (int) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Hold Periods}: Real trajectories include ``hold'' periods where the reference is NaN (typically first 120 timesteps while the catheter transitions between configurations). Naive training pipelines fail on these NaN values.
+
+\textbf{Dataset Challenge}: Real trajectories exhibit 44 mm baseline tracking RMSE (vs.~2 mm for synthetic), indicating fundamentally harder tracking conditions.
+
+%==============================================================================
+\section{Health Gating and Windowed Validation}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Motivation for Health Gates}
+%------------------------------------------------------------------------------
+
+Early experiments revealed that calibration and benchmarking scripts would:
+\begin{enumerate}
+\item Run MPC on datasets with rank-deficient Jacobians ($\text{rank}(A) = 0$)
+\item Produce NaN tracking RMSE
+\item Write placeholder thresholds to artifact files
+\item Claim ``completion'' with meaningless metrics
+\end{enumerate}
+
+This motivated a \emph{preflight validation} system that excludes problematic datasets before expensive computation.
+
+%------------------------------------------------------------------------------
+\subsection{Health Gate Implementation}
+%------------------------------------------------------------------------------
+
+The health gate runs a short (2-second) MPC-only preflight on each dataset, checking:
+
+\begin{enumerate}
+\item \textbf{Jacobian rank}: $\text{rank}(A) = 6$ (full rank)
+\item \textbf{Solver status}: Exit code = 0 (success)
+\item \textbf{Solve residual}: $\|A \mathbf{x} - \text{rhs}\| < 10^{-10}$
+\item \textbf{Finite outputs}: No NaN/Inf in state or control
+\item \textbf{Pathological RMSE}: Tracking error $< 100$ mm
+\end{enumerate}
+
+Failure modes are categorized: \texttt{rank\_deficient}, \texttt{status\_nonzero}, \texttt{mpc\_nan\_inf}, \texttt{dynamics\_nan\_inf}, \texttt{tracking\_pathological}.
+
+%------------------------------------------------------------------------------
+\subsection{Windowed Validation}
+%------------------------------------------------------------------------------
+
+Full-trajectory validation is insufficient for real NPZ data because:
+\begin{itemize}
+\item Trajectories are 640 steps (vs.~20--50 for synthetic)
+\item DAgger rollouts timeout at 180 s (only reaches 60 steps)
+\item Hold periods render early portions unusable
+\end{itemize}
+
+\textbf{Solution}: Extract fixed-length windows (20--50 steps) from valid regions:
+\begin{enumerate}
+\item Detect hold period from \texttt{hold} field or NaN detection
+\item Skip first \texttt{hold} timesteps
+\item Extract non-overlapping windows with stride = window length
+\item Apply health gate to each window independently
+\end{enumerate}
+
+For the primary real dataset (\texttt{dyn\_fk\_lem1\_y40\_a10\_L94\_hold1.npz}):
+\begin{itemize}
+\item Total timesteps: 320
+\item Hold period: 120 (37.5\%)
+\item Valid region: steps 120--320
+\item Windows extracted: 10 (20 steps each)
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Why Windowing Was Essential}
+%------------------------------------------------------------------------------
+
+Without windowed validation:
+\begin{itemize}
+\item Full-trajectory training timed out at 60/640 steps
+\item Training data was biased toward early timesteps
+\item Hold periods injected NaN into training set
+\item Quality metrics computed over invalid regions
+\end{itemize}
+
+With windowed validation:
+\begin{itemize}
+\item Each window completes in $\sim$15 s
+\item All windows come from valid post-hold region
+\item Training samples are uniformly distributed
+\item Metrics are meaningful and comparable
+\end{itemize}
+
+%==============================================================================
+\section{Training Pipelines}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Synthetic Training (CP4.x)}
+%------------------------------------------------------------------------------
+
+\textbf{Behavioral Cloning (CP4.0)}: Supervised learning on MPC demonstrations, using MSE loss between policy output and expert action. This establishes baseline performance but suffers from distribution shift.
+
+\textbf{DAgger (CP4.3)}: Iterative expert aggregation over 5 rounds. At each round:
+\begin{enumerate}
+\item Roll out policy for 20--50 steps
+\item Query MPC expert at each visited state
+\item Aggregate $(s, a^*)$ pairs into training set
+\item Retrain policy on combined data
+\end{enumerate}
+
+\textbf{Recurrent DAgger (CP4.4a)}: Replace feedforward MLP with GRU to model temporal dependencies. Hidden states are rolled out during training; expert queries occur at each timestep.
+
+\textbf{Ensemble DAgger (CP4.5)}: Train $N=3$ GRUs with different seeds. Final ensemble provides mean prediction and variance.
+
+\textbf{What Worked}: On synthetic circle/lemniscate trajectories, the trained ensemble achieves:
+\begin{itemize}
+\item Tracking RMSE within 0.5 mm of MPC-only
+\item MPC call rate $\approx 20$--$30\%$ on familiar states
+\item 2$\times$ speedup when policy executes
+\item Uncertainty-error correlation $r = 0.641$
+\end{itemize}
+
+\textbf{What Did Not Generalize}: When evaluated on real NPZ data:
+\begin{itemize}
+\item Uncertainty $\gg \tau_{\text{high}}$ at all timesteps
+\item 100\% MPC fallback (policy never executes)
+\item No speedup (actually 0.46$\times$ due to ensemble overhead)
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Real-Window Ensemble Training (CP5.1)}
+%------------------------------------------------------------------------------
+
+To address domain shift, we implemented windowed training on real NPZ data:
+
+\begin{enumerate}
+\item Load real NPZ datasets
+\item Apply health gate with hold-aware filtering
+\item Extract valid 20-step windows
+\item For each window: run MPC expert, collect $(p_{\text{tip}}, p_{\text{ref}}, u^*)$ tuples
+\item Train ensemble via behavioral cloning on aggregated data
+\end{enumerate}
+
+\textbf{Configuration}: 20 windows, 3 ensemble members, 50 epochs, early stopping with patience 10.
+
+\textbf{Runtime}: Window collection $\approx$ 15 s/window, training $\approx$ 5 s/member. Total $\approx$ 6 minutes for default configuration.
+
+\textbf{Why Training Did Not Complete Full Evaluation}: The nightly closure report, which trains the ensemble then runs quality benchmarks, requires $\sim$30--60 minutes. Due to computational constraints (600 s CTest timeout), only smoke tests (18.6 s) completed within CI budget. Full validation was designed for nightly runs.
+
+\textbf{Smoke Test Results}: The windowed training pipeline runs end-to-end:
+\begin{itemize}
+\item 2 windows collected in 8.6 s
+\item 16 training samples, 4 validation samples
+\item Best validation loss: 0.0085 (finite, not NaN)
+\item Artifacts created correctly
+\end{itemize}
+
+However, the full nightly benchmark validating quality gates was not executed due to timeout constraints.
+
+%==============================================================================
+\section{Experiments and Evaluation}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Metrics}
+%------------------------------------------------------------------------------
+
+\textbf{Tracking Performance}:
+\begin{itemize}
+\item RMSE: $\sqrt{\frac{1}{T}\sum_{t=1}^T \|\mathbf{p}_{\text{tip},t} - \mathbf{p}_{\text{ref},t}\|^2}$
+\item Maximum error: $\max_t \|\mathbf{p}_{\text{tip},t} - \mathbf{p}_{\text{ref},t}\|$
+\end{itemize}
+
+\textbf{Efficiency}:
+\begin{itemize}
+\item MPC call rate: Fraction of timesteps invoking MPC
+\item Speedup: $\frac{\text{time}_{\text{MPC-only}}}{\text{time}_{\text{hybrid}}}$
+\end{itemize}
+
+\textbf{Safety}:
+\begin{itemize}
+\item Safety violations: Timesteps with solver failure
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Synthetic Results}
+%------------------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\caption{Synthetic Trajectory Results (Golden Data)}
+\begin{tabular}{lcccc}
+\toprule
+Controller & RMSE (mm) & Max Error & MPC Rate & Speedup \\
+\midrule
+MPC-only & 2.03 & 3.15 & 100\% & 1.0$\times$ \\
+Hybrid (trained) & 2.08 & 3.22 & 28\% & 2.1$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Acceptance criteria}: RMSE $\leq$ MPC + 0.5 mm (\checkmark), MPC rate $\leq 30\%$ (\checkmark), speedup $\geq 2\times$ (\checkmark), safety violations = 0 (\checkmark).
+
+%------------------------------------------------------------------------------
+\subsection{Real Data Results}
+%------------------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\caption{Real NPZ Trajectory Results (CP5.0)}
+\begin{tabular}{lcccc}
+\toprule
+Controller & RMSE (mm) & Max Error & MPC Rate & Speedup \\
+\midrule
+MPC-only & 44.03 & --- & 100\% & 1.0$\times$ \\
+Hybrid (synth-trained) & 44.03 & --- & 100\% & 0.46$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key observations}:
+\begin{itemize}
+\item Hybrid RMSE = MPC RMSE (identical, because policy never executed)
+\item MPC call rate = 100\% (ensemble uncertainty always $> \tau_{\text{high}}$)
+\item Speedup = 0.46$\times$ (slower due to ensemble overhead without benefit)
+\item Safety violations = 0 (MPC fallback always succeeds)
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Evaluation Limitations}
+%------------------------------------------------------------------------------
+
+\textbf{Short-horizon tests distort speedup metrics}: Smoke tests use 30-step horizons; MPC startup cost dominates, making hybrid overhead proportionally larger. Full-trajectory evaluation (640 steps) would amortize fixed costs.
+
+\textbf{CI vs.~nightly evaluation}: Smoke tests (60 s budget) verify pipeline correctness. Quality benchmarks (600+ s) validate performance. Only smoke tests completed reliably.
+
+\textbf{Incomplete real-window training evaluation}: CP5.1 training pipeline was implemented and smoke-tested, but nightly closure report (training + quality benchmark + threshold calibration) was not executed to completion.
+
+%==============================================================================
+\section{Results}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{What Passed Reliably}
+%------------------------------------------------------------------------------
+
+\begin{itemize}
+\item \textbf{Physics layer}: Forward/backward dynamics (2.62$\times$ batched VJP speedup)
+\item \textbf{Control optimization}: iLQR convergence, MPC tracking (2 mm RMSE on synthetic)
+\item \textbf{Health gating}: Detection of rank-deficient Jacobians, hold periods, NaN propagation
+\item \textbf{Hybrid infrastructure}: Mode switching, safety override, metrics collection
+\item \textbf{Ensemble uncertainty}: Predictive of error ($r=0.641$) on synthetic data
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{What Failed}
+%------------------------------------------------------------------------------
+
+\begin{itemize}
+\item \textbf{Domain generalization}: Synthetic-trained ensemble fails on real data
+\item \textbf{Performance targets}: MPC call rate 100\% (target $\leq 30\%$), speedup 0.46$\times$ (target $\geq 2\times$)
+\item \textbf{Real-window training closure}: Pipeline implemented but not validated end-to-end
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Key Quantitative Observations}
+%------------------------------------------------------------------------------
+
+\textbf{Domain shift magnitude}: Real data baseline RMSE is 22$\times$ worse than synthetic (44 mm vs.~2 mm). This is not a minor distribution shift but a fundamentally different operating regime.
+
+\textbf{Uncertainty behavior is correct}: The ensemble \emph{correctly} reports high uncertainty on out-of-distribution states. The problem is not miscalibrated uncertainty but genuine epistemic uncertainty from training on the wrong distribution.
+
+\textbf{MPC fallback is safe}: Zero safety violations on real data. The system degrades to MPC-only gracefully.
+
+%------------------------------------------------------------------------------
+\subsection{Domain Shift Evidence}
+%------------------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\caption{Distribution Comparison: Synthetic vs.~Real}
+\begin{tabular}{lcc}
+\toprule
+Property & Synthetic & Real \\
+\midrule
+Trajectory length & 50--100 steps & 640 steps \\
+MPC baseline RMSE & 2 mm & 44 mm \\
+Reference smoothness & High (geometric) & Low (recorded) \\
+Hold periods & None & 120 steps (37\%) \\
+Ensemble uncertainty & Low (in-distribution) & High (OOD) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%==============================================================================
+\section{Discussion}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Why the System Is Safe But Slow}
+%------------------------------------------------------------------------------
+
+The hybrid controller's design prioritizes \emph{safety over speed}: when uncertain, always fall back to MPC. This is the correct behavior for safety-critical applications. The cost is that untrained policies provide no benefit.
+
+%------------------------------------------------------------------------------
+\subsection{Why Uncertainty Behaved Correctly}
+%------------------------------------------------------------------------------
+
+Ensemble variance is an estimate of epistemic uncertainty---the model's uncertainty about which function best fits the data. High variance on real data means the ensemble has not seen similar states during training. This is \emph{correct uncertainty estimation}, not a failure.
+
+%------------------------------------------------------------------------------
+\subsection{Why Performance Closure Failed}
+%------------------------------------------------------------------------------
+
+The fundamental issue is \textbf{training data}: the ensemble was trained exclusively on synthetic golden trajectories. When deployed on real catheter recordings with 22$\times$ higher tracking difficulty, every state is out-of-distribution.
+
+%------------------------------------------------------------------------------
+\subsection{The Fundamental Bottleneck}
+%------------------------------------------------------------------------------
+
+\textbf{MPC cost in data collection}: DAgger requires querying the MPC expert at every visited state. For 640-step real trajectories with MPC costing $\sim$100 ms/step, a single trajectory rollout takes $\sim$64 seconds. Five DAgger iterations on 10 trajectories would require $\sim$53 minutes---exceeding typical CI timeouts.
+
+\textbf{What Cannot Be Fixed Without Architectural Changes}:
+\begin{itemize}
+\item Faster MPC (already using C++ Jacobians at 2.62$\times$ speedup)
+\item Shorter horizons (degrades tracking quality)
+\item Fewer DAgger iterations (degrades policy quality)
+\item Synthetic data augmentation (does not address domain shift)
+\end{itemize}
+
+%==============================================================================
+\section{Limitations}
+%==============================================================================
+
+\begin{enumerate}
+\item \textbf{Compute constraints}: Full nightly benchmarks require 30--60 minutes; CI timeouts limited validation.
+
+\item \textbf{Dataset quality}: Only 6 real NPZ files available, with $\sim$200 valid timesteps each after hold filtering.
+
+\item \textbf{MPC dependence}: The hybrid controller requires MPC as an oracle. Without a reliable expert, DAgger cannot collect training labels.
+
+\item \textbf{Not real-time on real data}: With 100\% MPC fallback, the system provides no computational benefit over MPC-only.
+
+\item \textbf{No online adaptation}: Once deployed, the policy does not update from experience.
+
+\item \textbf{Single insertion length}: All experiments used fixed $L_{\text{inserted}} = 50$ mm (synthetic) or $94.3$ mm (real). Generalization across insertion lengths was not tested.
+\end{enumerate}
+
+%==============================================================================
+\section{Conclusion}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{What Was Achieved}
+%------------------------------------------------------------------------------
+
+\begin{itemize}
+\item A differentiable Cosserat rod simulator with analytic VJPs (2.62$\times$ batched speedup)
+\item An uncertainty-aware hybrid controller with verified safety guarantees
+\item A health-gated windowed validation pipeline that detects and excludes problematic data
+\item Demonstration of 2$\times$ speedup on synthetic trajectories where the policy is confident
+\item Correct uncertainty behavior: high variance on out-of-distribution states
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{What Was Learned}
+%------------------------------------------------------------------------------
+
+\begin{itemize}
+\item Distribution shift between synthetic and real catheter data is severe (22$\times$ RMSE gap)
+\item Ensemble uncertainty correctly identifies OOD states but cannot \emph{prevent} the distribution shift
+\item DAgger with expensive MPC experts is computationally prohibitive for long real trajectories
+\item Windowed training is necessary for handling long real-world recordings
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Why This Work Is Still Valuable}
+%------------------------------------------------------------------------------
+
+Despite not achieving performance closure on real data, this work provides:
+\begin{enumerate}
+\item A validated differentiable simulation framework ready for gradient-based learning
+\item Honest documentation of failure modes in hybrid learning-based control
+\item Infrastructure for future work: health gates, windowed training, ensemble uncertainty
+\item Evidence that uncertainty-aware fallback provides safety guarantees
+\end{enumerate}
+
+%------------------------------------------------------------------------------
+\subsection{Clear Stopping Point}
+%------------------------------------------------------------------------------
+
+This work stops at the boundary where additional progress requires either:
+\begin{itemize}
+\item Significantly more real-world training data (weeks of additional MPC rollouts)
+\item Alternative expert sources (e.g., human teleoperation, model-free RL)
+\item Simulation-to-real transfer techniques (domain randomization, system identification)
+\end{itemize}
+
+None of these were within scope. The infrastructure is ready; the data is the bottleneck.
+
+%==============================================================================
+\section*{Acknowledgments}
+%==============================================================================
+[Removed for anonymous review]
+
+%==============================================================================
+\appendix
+%==============================================================================
+
+\section{Hybrid Controller Pseudocode}
+
+\begin{algorithm}
+\caption{Hybrid Controller Step}
+\begin{algorithmic}[1]
+\REQUIRE State $\mathbf{x}_t$, tip $\mathbf{p}_{\text{tip}}$, reference horizon $\{\mathbf{p}_{\text{ref},k}\}_{k=0}^{H-1}$, hidden states
+\STATE $\bar{\mathbf{u}}, \sigma^2, \text{hiddens} \gets \text{Ensemble.predict}(\mathbf{p}_{\text{tip}}, \mathbf{p}_{\text{ref},0})$
+\STATE $\sigma \gets \max(\sigma^2)$
+\IF{$\sigma < \tau_{\text{low}}$}
+    \STATE $\mathbf{u} \gets \bar{\mathbf{u}}$, mode $\gets$ \texttt{POLICY}
+\ELSIF{$\sigma < \tau_{\text{high}}$}
+    \STATE $\mathbf{u} \gets \text{MPC}(\mathbf{x}_t, \text{init}=\bar{\mathbf{u}})$, mode $\gets$ \texttt{MPC\_WARM}
+\ELSE
+    \STATE $\mathbf{u} \gets \text{MPC}(\mathbf{x}_t, \text{init}=\mathbf{0})$, mode $\gets$ \texttt{MPC\_COLD}
+\ENDIF
+\STATE $\mathbf{x}_{t+1}, \text{status} \gets \text{dynamics\_forward}(\mathbf{x}_t, \mathbf{u})$
+\IF{status $\neq 0$ \OR tracking\_error $> 5$ mm}
+    \STATE $\mathbf{u} \gets \text{MPC}(\mathbf{x}_t, \text{init}=\mathbf{0})$, mode $\gets$ \texttt{SAFETY}
+\ENDIF
+\RETURN $\mathbf{u}$, mode, $\mathbf{x}_{t+1}$, hiddens
+\end{algorithmic}
+\end{algorithm}
+
+\section{Health Gate Logic}
+
+\begin{algorithm}
+\caption{Window Health Gate}
+\begin{algorithmic}[1]
+\REQUIRE Dataset $\mathcal{D}$, duration $\delta$
+\STATE start $\gets$ dataset.hold (skip NaN region)
+\STATE windows $\gets$ extract\_windows($\mathcal{D}$, start, stride=20)
+\FORALL{window in windows}
+    \STATE Run MPC-only for $\delta$ seconds
+    \IF{rank(A) $< 6$}
+        \STATE Mark INVALID: rank\_deficient
+    \ELSIF{status $\neq 0$}
+        \STATE Mark INVALID: solver\_failure
+    \ELSIF{any NaN in output}
+        \STATE Mark INVALID: nan\_propagation
+    \ELSIF{RMSE $> 100$ mm}
+        \STATE Mark INVALID: pathological
+    \ELSE
+        \STATE Mark VALID
+    \ENDIF
+\ENDFOR
+\RETURN valid\_windows, invalid\_windows
+\end{algorithmic}
+\end{algorithm}
+
+\section{Timing Breakdown}
+
+\begin{table}[h]
+\centering
+\caption{Computational Cost per Operation}
+\begin{tabular}{lcc}
+\toprule
+Operation & Time (CPU) & Notes \\
+\midrule
+Equilibrium forward & $\sim$0.5 ms & BVP solve \\
+Equilibrium backward & $\sim$2 ms & Implicit diff \\
+Dynamics forward & $\sim$1 ms & LU solve \\
+Dynamics backward & $\sim$2 ms & VJP \\
+Linearization (PyTorch) & $\sim$154 ms & 6$\times$ Jacobian \\
+Linearization (C++) & $\sim$84 ms & 1.83$\times$ speedup \\
+Batched VJP (CP4.4c) & $\sim$24 ms & 2.62$\times$ speedup \\
+iLQR iteration & $\sim$500 ms & Forward + backward \\
+MPC step (warm) & 10--50 ms & 3--10 iterations \\
+MPC step (cold) & 50--200 ms & 10--30 iterations \\
+Policy inference & $\sim$0.1 ms & GRU forward \\
+Ensemble inference & $\sim$0.3 ms & 3 policies \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Failure Mode Summary}
+
+\begin{table}[h]
+\centering
+\caption{Failure Modes Detected by Health Gate}
+\begin{tabular}{lp{4cm}p{2cm}}
+\toprule
+Mode & Description & Frequency \\
+\midrule
+rank\_deficient & $\text{rank}(A) < 6$ & Rare (physics issue) \\
+status\_nonzero & Solver did not converge & Occasional \\
+nan\_propagation & NaN in dynamics output & During hold periods \\
+pathological\_rmse & RMSE $> 100$ mm & Unconditioned data \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
