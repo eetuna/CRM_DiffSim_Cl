@@ -503,6 +503,183 @@ bool check_api_compat(const std::string& required_version) {
     return true;
 }
 
+// CP4.4b/4.4c: Fast Jacobian computation for iLQR/MPC
+// Computes A = ∂x_next/∂x_t and B = ∂x_next/∂u_t using batched VJP (CP4.4c)
+py::dict py_dynamics_linearize(
+    py::array_t<double> x_t_arr,
+    py::array_t<double> u_t_arr,
+    double dt,
+    double L_inserted,
+    py::dict params_dict
+) {
+    // Validate x_t
+    auto x_t_buf = x_t_arr.request();
+    if (x_t_buf.ndim != 1 || x_t_buf.shape[0] != 6) {
+        throw std::runtime_error("x_t must be 1D array of length 6");
+    }
+
+    // Validate u_t
+    auto u_t_buf = u_t_arr.request();
+    if (u_t_buf.ndim != 1 || u_t_buf.shape[0] != NUM_ACT_SET * 3) {
+        throw std::runtime_error("u_t must be 1D array of length " + std::to_string(NUM_ACT_SET * 3));
+    }
+
+    double* x_t = static_cast<double*>(x_t_buf.ptr);
+    double* u_t = static_cast<double*>(u_t_buf.ptr);
+
+    CRMForwardKinematicsData fk_params = parse_fk_params(params_dict);
+
+    // Forward pass to get cached result
+    DynamicsStepResult fwd_result;
+    std::memset(&fwd_result, 0, sizeof(DynamicsStepResult));
+
+    int status = dynamics_forward(x_t, u_t, dt, L_inserted, fk_params, fwd_result);
+
+    if (status != 0) {
+        // Return empty Jacobians on failure
+        auto A_arr = py::array_t<double>({6, 6});
+        auto B_arr = py::array_t<double>({6, NUM_ACT_SET * 3});
+        std::memset(A_arr.mutable_data(), 0, 36 * sizeof(double));
+        std::memset(B_arr.mutable_data(), 0, 6 * NUM_ACT_SET * 3 * sizeof(double));
+
+        py::dict out;
+        out["A"] = A_arr;
+        out["B"] = B_arr;
+        out["status"] = status;
+        out["lu_rank"] = fwd_result.lu_rank;
+        out["rel_solve_residual"] = fwd_result.rel_solve_residual;
+        out["solve_residual"] = fwd_result.solve_residual;
+        out["converged"] = fwd_result.converged;
+        out["api_version"] = CRM_API_VERSION;
+        out["api_contract"] = CRM_API_CONTRACT_DYNAMICS;
+        return out;
+    }
+
+    // CP4.4c: Use batched VJP with canonical basis vectors (6×6 identity)
+    auto V_arr = py::array_t<double>({6, 6});
+    double* V_ptr = V_arr.mutable_data();
+    std::memset(V_ptr, 0, 36 * sizeof(double));
+    for (int i = 0; i < 6; i++) {
+        V_ptr[i * 6 + i] = 1.0;  // Identity matrix (row-major)
+    }
+
+    auto A_arr = py::array_t<double>({6, 6});
+    auto B_arr = py::array_t<double>({6, NUM_ACT_SET * 3});
+
+    double* A_ptr = A_arr.mutable_data();
+    double* B_ptr = B_arr.mutable_data();
+
+    int lu_rank = 0;
+    double rel_residual = 0.0;
+
+    // Call batched VJP (K=6 canonical basis vectors)
+    int bwd_status = dynamics_backward_batched(
+        fwd_result, V_ptr, 6, fk_params,
+        A_ptr, B_ptr, &lu_rank, &rel_residual
+    );
+
+    py::dict out;
+    out["A"] = A_arr;
+    out["B"] = B_arr;
+    out["status"] = bwd_status;
+    out["lu_rank"] = lu_rank;
+    out["rel_solve_residual"] = rel_residual;
+    out["solve_residual"] = fwd_result.solve_residual;
+    out["converged"] = fwd_result.converged;
+    out["api_version"] = CRM_API_VERSION;
+    out["api_contract"] = CRM_API_CONTRACT_DYNAMICS;
+
+    return out;
+}
+
+// CP4.4c: Batched VJP API
+py::dict py_dynamics_linearize_batched(
+    py::array_t<double> x_t_arr,
+    py::array_t<double> u_t_arr,
+    double dt,
+    double L_inserted,
+    py::dict params_dict,
+    py::array_t<double> V_arr  // (K, 6) adjoint matrix
+) {
+    // Validate x_t
+    auto x_t_buf = x_t_arr.request();
+    if (x_t_buf.ndim != 1 || x_t_buf.shape[0] != 6) {
+        throw std::runtime_error("x_t must be 1D array of length 6");
+    }
+
+    // Validate u_t
+    auto u_t_buf = u_t_arr.request();
+    if (u_t_buf.ndim != 1 || u_t_buf.shape[0] != NUM_ACT_SET * 3) {
+        throw std::runtime_error("u_t must be 1D array of length " + std::to_string(NUM_ACT_SET * 3));
+    }
+
+    // Validate V
+    auto V_buf = V_arr.request();
+    if (V_buf.ndim != 2 || V_buf.shape[1] != 6) {
+        throw std::runtime_error("V must be 2D array with shape (K, 6)");
+    }
+    int K = V_buf.shape[0];
+
+    double* x_t = static_cast<double*>(x_t_buf.ptr);
+    double* u_t = static_cast<double*>(u_t_buf.ptr);
+    double* V = static_cast<double*>(V_buf.ptr);
+
+    CRMForwardKinematicsData fk_params = parse_fk_params(params_dict);
+
+    // Forward pass to get cached result
+    DynamicsStepResult fwd_result;
+    std::memset(&fwd_result, 0, sizeof(DynamicsStepResult));
+
+    int status = dynamics_forward(x_t, u_t, dt, L_inserted, fk_params, fwd_result);
+
+    if (status != 0) {
+        // Return empty results on failure
+        auto W_x_arr = py::array_t<double>({K, 6});
+        auto W_u_arr = py::array_t<double>({K, NUM_ACT_SET * 3});
+        std::memset(W_x_arr.mutable_data(), 0, K * 6 * sizeof(double));
+        std::memset(W_u_arr.mutable_data(), 0, K * NUM_ACT_SET * 3 * sizeof(double));
+
+        py::dict out;
+        out["W_x"] = W_x_arr;
+        out["W_u"] = W_u_arr;
+        out["status"] = status;
+        out["lu_rank"] = fwd_result.lu_rank;
+        out["rel_solve_residual"] = fwd_result.rel_solve_residual;
+        out["solve_residual"] = fwd_result.solve_residual;
+        out["converged"] = fwd_result.converged;
+        out["api_version"] = CRM_API_VERSION;
+        out["api_contract"] = CRM_API_CONTRACT_DYNAMICS;
+        return out;
+    }
+
+    // Allocate output arrays
+    auto W_x_arr = py::array_t<double>({K, 6});
+    auto W_u_arr = py::array_t<double>({K, NUM_ACT_SET * 3});
+
+    double* W_x = W_x_arr.mutable_data();
+    double* W_u = W_u_arr.mutable_data();
+
+    int lu_rank = 0;
+    double rel_residual = 0.0;
+
+    // Call batched VJP
+    int bwd_status = dynamics_backward_batched(
+        fwd_result, V, K, fk_params,
+        W_x, W_u, &lu_rank, &rel_residual
+    );
+
+    py::dict out;
+    out["W_x"] = W_x_arr;
+    out["W_u"] = W_u_arr;
+    out["status"] = bwd_status;
+    out["lu_rank"] = lu_rank;
+    out["rel_residual"] = rel_residual;
+    out["api_version"] = CRM_API_VERSION;
+    out["api_contract"] = CRM_API_CONTRACT_DYNAMICS;
+
+    return out;
+}
+
 PYBIND11_MODULE(crm_diff_py, m) {
     m.doc() = "CRM Differentiable Simulator Python Bindings (CP2.3)";
 
@@ -548,6 +725,16 @@ PYBIND11_MODULE(crm_diff_py, m) {
     m.def("dynamics_backward", &py_dynamics_backward,
           py::arg("fwd_result"), py::arg("grad_x_next"), py::arg("params_dict"),
           "Dynamics backward pass: compute gradients w.r.t. x_t and u_t");
+
+    // CP4.4b: Fast Jacobian linearization
+    m.def("dynamics_linearize", &py_dynamics_linearize,
+          py::arg("x_t"), py::arg("u_t"), py::arg("dt"), py::arg("L_inserted"), py::arg("params_dict"),
+          "CP4.4b: Compute linearization A, B for iLQR/MPC using C++ Jacobians");
+
+    // CP4.4c: Batched VJP API
+    m.def("dynamics_linearize_batched", &py_dynamics_linearize_batched,
+          py::arg("x_t"), py::arg("u_t"), py::arg("dt"), py::arg("L_inserted"), py::arg("params_dict"), py::arg("V"),
+          "CP4.4c: Batched VJP for faster Jacobian computation. V is (K,6) matrix of adjoint vectors.");
 
     // Expose opaque pointer types (needed for parameter dict)
     py::class_<CRMCatheterModelParams>(m, "CRMCatheterModelParams");

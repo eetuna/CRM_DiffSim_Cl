@@ -40,7 +40,8 @@ class iLQRSolver:
     def __init__(self, dt, L_inserted, params_dict, horizon,
                  Q=None, R=None, p_target=None, terminal_weight=100.0,
                  max_iters=50, tol=1e-3, reg_init=1e-3, reg_scale=10.0,
-                 line_search_alphas=None, terminal_hessian_mode="gn", eps_hessian=1e-5):
+                 line_search_alphas=None, terminal_hessian_mode="gn", eps_hessian=1e-5,
+                 jacobian_mode="torch"):
         """
         Args:
             dt: float, timestep (seconds)
@@ -60,6 +61,9 @@ class iLQRSolver:
                                   "gn": Gauss-Newton approximation (default, backward compatible)
                                   "fd_exact": FD-based exact Hessian (P1-3 enhancement)
             eps_hessian: float, finite difference step size for fd_exact mode (default: 1e-5)
+            jacobian_mode: str, Jacobian computation mode (CP4.4b)
+                          "torch": PyTorch autograd (default, backward compatible)
+                          "cpp": C++ dynamics_linearize (faster)
         """
         self.dt = dt
         self.L_inserted = L_inserted
@@ -85,6 +89,11 @@ class iLQRSolver:
             raise ValueError(f"terminal_hessian_mode must be 'gn' or 'fd_exact', got '{terminal_hessian_mode}'")
         self.terminal_hessian_mode = terminal_hessian_mode
         self.eps_hessian = eps_hessian
+
+        # CP4.4b: Jacobian mode
+        if jacobian_mode not in ["torch", "cpp"]:
+            raise ValueError(f"jacobian_mode must be 'torch' or 'cpp', got '{jacobian_mode}'")
+        self.jacobian_mode = jacobian_mode
 
         # History for diagnostics
         self.cost_history = []
@@ -166,6 +175,42 @@ class iLQRSolver:
         ).numpy()
 
         return A, B
+
+    def extract_jacobians_cpp(self, x_t, u_t):
+        """
+        CP4.4b: Extract linearization A_t, B_t using C++ dynamics_linearize.
+
+        Args:
+            x_t: np.array (6,)
+            u_t: np.array (3,)
+
+        Returns:
+            A: np.array (6, 6), state Jacobian
+            B: np.array (6, 3), control Jacobian
+        """
+        result = crm_diff_py.dynamics_linearize(
+            x_t, u_t, self.dt, self.L_inserted, self.params_dict
+        )
+        return result['A'], result['B']
+
+    def extract_jacobians(self, x_t, u_t):
+        """
+        Extract linearization A_t, B_t using configured jacobian_mode.
+
+        Args:
+            x_t: np.array (6,)
+            u_t: np.array (3,)
+
+        Returns:
+            A: np.array (6, 6), state Jacobian
+            B: np.array (6, 3), control Jacobian
+        """
+        if self.jacobian_mode == "torch":
+            return self.extract_jacobians_pytorch(x_t, u_t)
+        elif self.jacobian_mode == "cpp":
+            return self.extract_jacobians_cpp(x_t, u_t)
+        else:
+            raise ValueError(f"Unknown jacobian_mode: {self.jacobian_mode}")
 
     def compute_tip_jacobian(self, x):
         """
@@ -273,7 +318,7 @@ class iLQRSolver:
         A_list = []
         B_list = []
         for t in range(self.horizon):
-            A_t, B_t = self.extract_jacobians_pytorch(X[t], U[t])
+            A_t, B_t = self.extract_jacobians(X[t], U[t])
             A_list.append(A_t)
             B_list.append(B_t)
 

@@ -356,11 +356,169 @@ if(pybind11_FOUND)
     set_tests_properties(terminal_hessian_improves_descent_p1_3 PROPERTIES TIMEOUT 180)
 endif()
 
-# CP3.5: Dataset-driven NPZ trajectory replay regression test (nightly-only, not in fast gate)
+# CP3.5: NPZ trajectory visualization (nightly-only, not in fast gate)
 if(pybind11_FOUND)
-    add_test(NAME replay_npz_tracking_cp35
+    add_test(NAME npz_visualization_cp35
              COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
                      python3 ${CMAKE_SOURCE_DIR}/python/test_cp35_replay_npz_tracking.py
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    set_tests_properties(replay_npz_tracking_cp35 PROPERTIES TIMEOUT 180)
+    set_tests_properties(npz_visualization_cp35 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP3.5.1: NPZ replay contract test (nightly-only, not in fast gate)
+if(pybind11_FOUND)
+    add_test(NAME npz_replay_contract_cp35
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp35_npz_replay_contract.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(npz_replay_contract_cp35 PROPERTIES TIMEOUT 120)
+endif()
+
+# CP4.1: Dataset contract test
+if(pybind11_FOUND)
+    add_test(NAME dataset_contract_cp41
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp41_dataset_contract.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(dataset_contract_cp41 PROPERTIES TIMEOUT 30)
+endif()
+
+# CP4.1: Multi-trajectory BC test (fast version for CI)
+if(pybind11_FOUND)
+    add_test(NAME bc_multitraj_cp41
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp41_bc_multitraj.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(bc_multitraj_cp41 PROPERTIES TIMEOUT 30)
+endif()
+
+# CP4.2: Evaluation smoke test
+if(pybind11_FOUND)
+    add_test(NAME eval_smoke_cp42
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp42_eval_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(eval_smoke_cp42 PROPERTIES TIMEOUT 30)
+endif()
+
+# CP4.3: DAgger smoke test
+if(pybind11_FOUND)
+    add_test(NAME dagger_smoke_cp43
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp43_dagger_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(dagger_smoke_cp43 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.4a: Recurrent DAgger smoke test
+if(pybind11_FOUND)
+    add_test(NAME recurrent_dagger_smoke_cp44
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp44_recurrent_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(recurrent_dagger_smoke_cp44 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.4b: Fast Jacobians correctness test
+if(pybind11_FOUND)
+    add_test(NAME jacobian_correctness_cp44b
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp44b_jacobian_correctness.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(jacobian_correctness_cp44b PROPERTIES TIMEOUT 30)
+endif()
+
+# CP4.4b: Jacobian performance benchmark (nightly only - slow)
+if(pybind11_FOUND)
+    add_test(NAME jacobian_benchmark_cp44b
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp44b_jacobian_benchmark.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(jacobian_benchmark_cp44b PROPERTIES TIMEOUT 180)
+    set_tests_properties(jacobian_benchmark_cp44b PROPERTIES LABELS "nightly")
+endif()
+
+# CP4.4c: Batched VJP correctness test
+if(pybind11_FOUND)
+    add_test(NAME batched_vjp_correctness_cp44c
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp44c_batched_vjp_correctness.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(batched_vjp_correctness_cp44c PROPERTIES TIMEOUT 30)
+endif()
+
+# CP4.4c: Batched VJP performance benchmark (nightly only - slow)
+if(pybind11_FOUND)
+    add_test(NAME batched_vjp_benchmark_cp44c
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp44c_batched_vjp_benchmark.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(batched_vjp_benchmark_cp44c PROPERTIES TIMEOUT 180)
+    set_tests_properties(batched_vjp_benchmark_cp44c PROPERTIES LABELS "nightly")
+endif()
+
+# CP4.5: Ensemble DAgger smoke test
+if(pybind11_FOUND)
+    add_test(NAME ensemble_dagger_smoke_cp45
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp45_ensemble_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(ensemble_dagger_smoke_cp45 PROPERTIES TIMEOUT 90)
+endif()
+
+# CP4.6: Circle reference validation test
+if(pybind11_FOUND)
+    add_test(NAME circle_has_reference_cp46
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp46_circle_has_reference.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(circle_has_reference_cp46 PROPERTIES TIMEOUT 10)
+endif()
+
+# CP4.6: Multi-task DAgger smoke test
+if(pybind11_FOUND)
+    add_test(NAME multitask_dagger_smoke_cp46
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp46_multitask_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(multitask_dagger_smoke_cp46 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.7: Hybrid controller smoke test (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME hybrid_controller_smoke_cp47
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_hybrid_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(hybrid_controller_smoke_cp47 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.7: Hybrid controller benchmark (nightly only)
+if(pybind11_FOUND)
+    add_test(NAME hybrid_controller_benchmark_cp47
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_hybrid_benchmark.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(hybrid_controller_benchmark_cp47 PROPERTIES TIMEOUT 600)
+    set_tests_properties(hybrid_controller_benchmark_cp47 PROPERTIES LABELS "nightly")
+endif()
+
+# CP4.7.1: Hybrid controller benchmark with trained ensemble (nightly only)
+if(pybind11_FOUND)
+    add_test(NAME hybrid_controller_benchmark_trained_cp47
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_hybrid_benchmark_trained.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(hybrid_controller_benchmark_trained_cp47 PROPERTIES TIMEOUT 600)
+    set_tests_properties(hybrid_controller_benchmark_trained_cp47 PROPERTIES LABELS "nightly")
+endif()
+
+# CP4.7.2: End-to-end trained validation (nightly only)
+if(pybind11_FOUND)
+    add_test(NAME hybrid_end_to_end_cp472
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_hybrid_end_to_end_cp472.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(hybrid_end_to_end_cp472 PROPERTIES TIMEOUT 1800)
+    set_tests_properties(hybrid_end_to_end_cp472 PROPERTIES LABELS "nightly")
 endif()

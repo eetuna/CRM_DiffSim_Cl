@@ -330,4 +330,116 @@ int dynamics_backward(
     return 0;  // Success
 }
 
+// CP4.4c: Batched VJP implementation
+int dynamics_backward_batched(
+    const DynamicsStepResult& fwd_result,
+    const double* V,
+    int K,
+    const CRMForwardKinematicsData& params,
+    double* W_x,
+    double* W_u,
+    int* lu_rank,
+    double* rel_residual
+) {
+    // Extract cached Jacobians
+    Map<const Matrix<double, 6, 6, RowMajor>> A_map(fwd_result.J_G_xnext);
+    Map<const Matrix<double, 6, 6, RowMajor>> C_map(fwd_result.J_G_xt);
+    Map<const Matrix<double, 6, Dynamic, RowMajor>> B_map(
+        fwd_result.J_G_ut, 6, 3*NUM_ACT_SET);
+
+    // Map adjoint matrix V (K×6, row-major)
+    Map<const Matrix<double, Dynamic, 6, RowMajor>> V_map(V, K, 6);
+
+    // Solve A^T Λ = V for all K adjoint vectors at once
+    // Λ is (6×K), V^T is (6×K)
+    FullPivLU<MatrixXd> lu_solver(A_map.transpose());
+
+    int rank = lu_solver.rank();
+    if (lu_rank) *lu_rank = rank;
+
+    if (rank < 6) {
+        return 1;  // Rank-deficient
+    }
+
+    // Solve for all K adjoints at once: A^T Λ = V^T
+    MatrixXd Lambda = lu_solver.solve(V_map.transpose());  // (6×K)
+
+    // Check solve accuracy (using Frobenius norm)
+    double residual_norm = (A_map.transpose() * Lambda - V_map.transpose()).norm();
+    double v_norm = V_map.norm();
+    double rel_res = residual_norm / std::max(v_norm, 1.0);
+
+    if (rel_residual) *rel_residual = rel_res;
+
+    if (rel_res > 1e-10) {
+        return 2;  // Inaccurate solve
+    }
+
+    // Compute W_x = -C^T Λ for all K at once
+    // W_x is (K×6), Λ is (6×K), C^T is (6×6)
+    // W_x^T = -C^T Λ => W_x = -Λ^T C
+    Map<Matrix<double, Dynamic, 6, RowMajor>> W_x_map(W_x, K, 6);
+    W_x_map = -Lambda.transpose() * C_map;
+
+    // Compute W_u with matrix-dependence (reuse equilibrium solves across all K)
+    Map<Matrix<double, Dynamic, Dynamic, RowMajor>> W_u_map(W_u, K, 3*NUM_ACT_SET);
+    W_u_map.setZero();
+
+    // Extract cached values
+    Map<const VectorXd> x_next_map(fwd_result.x_next, 6);
+    Map<const VectorXd> u_t_map(fwd_result.u_t_cached, 3*NUM_ACT_SET);
+
+    double eps = 1e-6;  // Finite difference epsilon
+
+    // Pre-allocate arrays outside loop
+    double u_pert[3*NUM_ACT_SET];
+    EquilibriumResult eq_pert;
+    double M_pert[9], D_pert[9];
+    double A_pert[36], C_pert[36], B_pert[6*NUM_ACT_SET*3];
+
+    // Pre-allocate Eigen matrices for FD computations
+    Matrix<double, 6, 6> dA_du_i;
+    Matrix<double, 6, Dynamic> dB_du_i(6, 3*NUM_ACT_SET);
+    VectorXd dr_du_i(6);
+
+    // Loop over control inputs (reuse across all K adjoints)
+    for (int i = 0; i < 3*NUM_ACT_SET; i++) {
+        // Perturb u_t[i]
+        std::memcpy(u_pert, fwd_result.u_t_cached, 3*NUM_ACT_SET * sizeof(double));
+        u_pert[i] += eps;
+
+        // Call equilibrium_forward with perturbed u (ONCE for all K adjoints)
+        std::memset(&eq_pert, 0, sizeof(EquilibriumResult));
+        int eq_status = equilibrium_forward(u_pert, fwd_result.L_inserted_cached, params, eq_pert);
+
+        if (eq_status != 0) {
+            return 3;  // Equilibrium failed during gradient computation
+        }
+
+        // Compute M, D from K_tip_pert
+        compute_physics_matrices(*(params.CathParams), eq_pert.K_tip, M_pert, D_pert);
+
+        // Compute A_pert, B_pert
+        compute_jacobians(M_pert, D_pert, eq_pert.K_tip, eq_pert.J_u_zc,
+                         fwd_result.dt_cached, A_pert, C_pert, B_pert);
+
+        // Compute dA/du_i and dB/du_i via finite differences
+        Map<const Matrix<double, 6, 6, RowMajor>> A_pert_map(A_pert);
+        Map<const Matrix<double, 6, Dynamic, RowMajor>> B_pert_map(B_pert, 6, 3*NUM_ACT_SET);
+
+        dA_du_i.noalias() = (A_pert_map - A_map) / eps;  // 6×6
+        dB_du_i.noalias() = (B_pert_map - B_map) / eps;  // 6×(3*NUM_ACT_SET)
+
+        // Compute dr/du_i = dA/du_i * x_next + dB/du_i * u_t + B[:,i]
+        dr_du_i.noalias() = dA_du_i * x_next_map + dB_du_i * u_t_map + B_map.col(i);
+
+        // For each adjoint k, compute W_u[k,i] = -(dr/du_i)^T * Lambda[:,k]
+        for (int k = 0; k < K; k++) {
+            W_u_map(k, i) = -dr_du_i.dot(Lambda.col(k));
+        }
+    }
+
+    return 0;  // Success
+}
+
 } // namespace CRMCatheterModel

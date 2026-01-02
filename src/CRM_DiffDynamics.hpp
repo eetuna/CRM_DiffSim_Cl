@@ -66,6 +66,23 @@ int dynamics_backward(
     double* rel_residual = nullptr         // Optional: solve residual
 );
 
+// CP4.4c: Batched VJP for faster Jacobian computation
+// Computes K VJPs in a single call, reusing equilibrium solves
+// V: (K, 6) matrix of adjoint vectors (row-major)
+// W_x: (K, 6) output gradients w.r.t. x_t (row-major)
+// W_u: (K, 3*NUM_ACT_SET) output gradients w.r.t. u_t (row-major)
+// Returns: 0=success, 1=rank-deficient, 2=residual too large, 3=equilibrium failed
+int dynamics_backward_batched(
+    const DynamicsStepResult& fwd_result,  // Cached forward result
+    const double* V,                       // Adjoint matrix (K×6, row-major)
+    int K,                                 // Number of adjoints
+    const CRMForwardKinematicsData& params, // Physics parameters
+    double* W_x,                           // Output: (K×6, row-major)
+    double* W_u,                           // Output: (K×3N, row-major)
+    int* lu_rank = nullptr,                // Optional: rank from FullPivLU
+    double* rel_residual = nullptr         // Optional: solve residual
+);
+
 } // namespace CRMCatheterModel
 
 #endif // CRM_DIFF_DYNAMICS_HPP
