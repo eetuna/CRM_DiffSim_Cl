@@ -30,6 +30,7 @@ from control.ilqr import iLQRSolver
 from models.ensemble_policy import EnsemblePolicy
 from models.recurrent_policy import GRUPolicy
 from data.npz_manifest import load_manifest
+from eval.cp47_health_gate import run_health_gate
 import crm_diff_py
 
 
@@ -238,7 +239,7 @@ def run_hybrid(dataset, ensemble, params_dict, tau_low, tau_high, duration=5.0):
 def main():
     """Main benchmark routine."""
     print("\n" + "="*60)
-    print("CP4.7.1: Hybrid Benchmark (Trained Ensemble)")
+    print("CP4.7.1/CP4.7.3: Hybrid Benchmark (Trained Ensemble)")
     print("="*60)
 
     # Check ensemble availability
@@ -276,9 +277,7 @@ def main():
             print("✗ No datasets available")
             return 1
 
-        print(f"✓ Using {len(datasets)} datasets:")
-        for ds in datasets:
-            print(f"  - {ds.filename}")
+        print(f"✓ Loaded {len(datasets)} datasets")
 
     except Exception as e:
         print(f"✗ Failed to load datasets: {e}")
@@ -299,6 +298,59 @@ def main():
         'IntegrationStepSize': 0.5,
         'FinalValueOnly': True,
     }
+
+    # CP4.7.3: Run health gate first
+    print("\n[CP4.7.3: Running health gate...]")
+    health_report = run_health_gate(
+        datasets,
+        params_dict,
+        duration=2.0,
+        verbose=True,
+        output_json_path='./build/artifacts/cp47_health_report.json'
+    )
+
+    # Filter to valid datasets only
+    valid_indices = health_report['valid_datasets']
+    if not valid_indices:
+        print("\n" + "="*60)
+        print("BENCHMARK SKIPPED")
+        print("="*60)
+        print("Reason: No valid datasets found after health gate")
+        print(f"Total datasets tested: {health_report['summary']['total_datasets']}")
+        print(f"Valid datasets: {health_report['summary']['valid_count']}")
+        print(f"Invalid datasets: {health_report['summary']['invalid_count']}")
+
+        if health_report['summary']['failure_reasons']:
+            print("\nFailure reasons:")
+            for reason, count in health_report['summary']['failure_reasons'].items():
+                print(f"  - {reason}: {count}")
+
+        print("="*60)
+
+        # Write skipped marker to results file
+        output_dir = './build/artifacts'
+        os.makedirs(output_dir, exist_ok=True)
+
+        results_path = os.path.join(output_dir, 'cp47_benchmark_trained_results.json')
+        with open(results_path, 'w') as f:
+            json.dump({
+                'skipped_reason': 'no_valid_datasets_after_health_gate',
+                'health_report_summary': health_report['summary'],
+                'thresholds': {'tau_low': tau_low, 'tau_high': tau_high},
+                'mpc_baseline': None,
+                'hybrid': None,
+                'comparison': None,
+                'acceptance': None,
+                'all_pass': False
+            }, f, indent=2)
+
+        print(f"\n✓ Saved skipped marker: {results_path}")
+        return 0  # Exit 0 (not a failure, just skipped)
+
+    datasets = [datasets[i] for i in valid_indices]
+    print(f"\n✓ Using {len(datasets)} valid datasets:")
+    for ds in datasets:
+        print(f"  - {ds.filename}")
 
     # Run benchmarks
     duration = 5.0  # 5 seconds per dataset
@@ -337,6 +389,17 @@ def main():
 
     speedup = avg_mpc_time / avg_hybrid_time if avg_hybrid_time > 0 else 0.0
     rmse_diff = avg_hybrid_rmse - avg_mpc_rmse
+
+    # CP4.7.3: Verify no NaN metrics
+    if not np.isfinite(avg_mpc_rmse):
+        print("\n✗ ERROR: MPC baseline RMSE is NaN/Inf")
+        print("  This should not happen after health gate - please investigate")
+        return 1
+
+    if not np.isfinite(avg_hybrid_rmse):
+        print("\n✗ ERROR: Hybrid RMSE is NaN/Inf")
+        print("  This should not happen after health gate - please investigate")
+        return 1
 
     # Check acceptance criteria
     criteria = {

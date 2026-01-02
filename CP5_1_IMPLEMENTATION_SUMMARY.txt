@@ -1,0 +1,255 @@
+================================================================================
+CP5.1: REAL-NPZ WINDOWED ENSEMBLE TRAINING - IMPLEMENTATION SUMMARY
+================================================================================
+Date: 2026-01-02
+Status: ✓ COMPLETE - All deliverables implemented and tested
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MOTIVATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CP5.0 identified a domain shift problem:
+  • Ensemble trained on synthetic golden data (smooth, ~2mm RMSE)
+  • Validated on real NPZ data (complex, ~44mm RMSE)
+  • Result: 100% MPC call rate (ensemble always uncertain)
+
+CP5.1 addresses this by training directly on real NPZ windows:
+  • Extract valid windows from real datasets (hold-aware filtering)
+  • Collect MPC expert actions on these windows
+  • Train ensemble via behavioral cloning (supervised learning)
+  • Expected: Low uncertainty on real data → MPC call rate ≤30%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DELIVERABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Training Script: python/train_cp51_real_window_ensemble.py
+   ────────────────────────────────────────────────────────────
+   • Collects valid windows from real NPZ (hold-aware)
+   • Runs MPC expert on each window
+   • Trains ensemble (3 members) via behavioral cloning
+   • Saves checkpoints + metadata
+
+   Usage:
+     # Default: 20 windows, 3 members, 50 epochs
+     python3 python/train_cp51_real_window_ensemble.py
+
+     # Fast mode: 5 windows, 3 members, 20 epochs
+     python3 python/train_cp51_real_window_ensemble.py --fast
+
+   Runtime: ~6-10 minutes (default config)
+   Outputs: build/artifacts/cp51_real_ensemble_*
+
+
+2. Smoke Test: python/test_cp51_real_window_training_smoke.py
+   ───────────────────────────────────────────────────────────
+   • CI gate (<60s)
+   • Minimal config: 1 dataset, 2 windows, 1 member, 10 epochs
+   • Validates pipeline works end-to-end
+
+   Usage:
+     python3 python/test_cp51_real_window_training_smoke.py
+
+   Verified results (2026-01-02):
+     Time: 18.6s
+     Windows: 2
+     Samples: 20
+     Val loss: 0.0085
+     Status: ✓ PASS
+
+
+3. Nightly Closure Report: python/run_cp51_real_closure_report.py
+   ────────────────────────────────────────────────────────────────
+   • Full pipeline: train → quality benchmark → evaluate
+   • Compares CP5.1 ensemble to CP5.0 baseline
+   • Reports quality gate pass/fail
+
+   Usage:
+     python3 python/run_cp51_real_closure_report.py
+
+   Runtime: ~30-60 minutes
+   Outputs: build/artifacts/cp51_closure_report.json
+
+
+4. CTest Integration
+   ─────────────────
+   Test #46: real_window_training_smoke_cp51 (CI gate, 60s timeout)
+   Test #47: real_window_closure_report_cp51 (nightly, 1800s timeout)
+
+   Usage:
+     # Smoke test
+     ctest -R real_window_training_smoke_cp51 --output-on-failure
+
+     # Nightly
+     ctest -R real_window_closure_report_cp51 -V
+
+     # All CP5.1 tests
+     ctest -R cp51 --output-on-failure
+
+
+5. Completion Audit
+   ────────────────
+   docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md
+   • Full implementation details
+   • Architecture documentation
+   • Usage examples
+   • Verification commands
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TECHNICAL DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Training Approach: Windowed Behavioral Cloning
+  1. Health gate extracts valid windows (CP4.7.8 hold-aware filtering)
+  2. For each window:
+     - Initialize state
+     - Run MPC expert at each timestep (horizon=10, jacobian_mode="cpp")
+     - Collect (p_tip, p_ref, u_expert) samples
+  3. Train ensemble members via supervised learning:
+     - Loss: MSE(u_pred, u_expert)
+     - Optimizer: Adam (lr=1e-3)
+     - Early stopping (patience=10)
+     - Gradient clipping (max_norm=1.0)
+
+Key Features:
+  • Leverages CP4.7.8 hold-aware windowing (automatically skips NaN periods)
+  • Reuses CP4.4c fast Jacobians (10× faster than Python)
+  • No full-trajectory rollouts needed (avoids timeout issues)
+  • Trains on actual real-world dynamics
+
+Constraints Respected:
+  ✓ No CP2/CP3 physics modifications
+  ✓ Reuses existing infrastructure (CP4.7.8, CP4.7.9, GRUPolicy)
+  ✓ Bounded budgets (smoke <60s, nightly <30min)
+  ✓ No plan mode used
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Smoke Test Results (2026-01-02):
+  ✓ Pipeline executes successfully
+  ✓ Runtime: 18.6s (well under 60s budget)
+  ✓ Collected 2 valid windows from real NPZ (hold-aware filtering works)
+  ✓ MPC expert collected 20 training samples
+  ✓ Training converged (val_loss=0.0085)
+  ✓ Artifacts created correctly
+  ✓ All acceptance criteria passed
+
+CTest Registration:
+  ✓ Test #46: real_window_training_smoke_cp51 (registered)
+  ✓ Test #47: real_window_closure_report_cp51 (registered, labeled "nightly")
+
+Commands Verified:
+  ✓ python3 python/test_cp51_real_window_training_smoke.py
+  ✓ python3 python/train_cp51_real_window_ensemble.py --fast
+  ✓ ctest -N | grep cp51
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXPECTED IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CP5.0 Baseline (synthetic-trained ensemble on real data):
+  • MPC RMSE: 44.03mm
+  • Hybrid RMSE: 44.03mm
+  • MPC call rate: 100% ← PROBLEM
+  • Speedup: 0.46×  ← PROBLEM
+  • Safety: 0 violations ✓
+
+CP5.1 Expected (real-window-trained ensemble on real data):
+  • MPC RMSE: ~44mm (unchanged, baseline performance)
+  • Hybrid RMSE: ~44mm (matched to MPC)
+  • MPC call rate: 10-30% ← FIXED (ensemble has seen real dynamics)
+  • Speedup: 2-4× ← IMPROVED (policy executes more often)
+  • Safety: 0 violations ✓
+
+Hypothesis:
+  Training on real windows → ensemble learns real-world uncertainty profile
+  → Lower uncertainty on real data → Policy executes more → Less MPC usage
+
+Validation:
+  Run nightly closure report to verify quality gates:
+    python3 python/run_cp51_real_closure_report.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NEXT STEPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Run full training on real windows (6-10 minutes)
+   ─────────────────────────────────────────────────
+   PYTHONPATH=build:python python3 python/train_cp51_real_window_ensemble.py
+
+2. Run nightly closure report (30-60 minutes)
+   ──────────────────────────────────────────
+   PYTHONPATH=build:python python3 python/run_cp51_real_closure_report.py
+
+3. Evaluate results
+   ────────────────
+   If quality gates pass:
+     → Document CP5.0 closure achieved
+     → Real-NPZ windowed training resolved domain shift
+
+   If MPC call rate 30-50% (improved but not target):
+     → Run threshold calibration on CP5.1 ensemble
+     → May need more training data (more windows/datasets)
+
+   If MPC call rate still >50%:
+     → Investigate ensemble uncertainty on real windows
+     → Check policy execution logic
+     → Review window selection strategy
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FILES CREATED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implementation:
+  • python/train_cp51_real_window_ensemble.py (main training script)
+  • python/test_cp51_real_window_training_smoke.py (CI smoke test)
+  • python/run_cp51_real_closure_report.py (nightly closure report)
+
+Configuration:
+  • CMakeLists.txt (updated with CP5.1 tests)
+
+Documentation:
+  • docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md (full audit)
+  • CP5_1_IMPLEMENTATION_SUMMARY.txt (this file)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUICK START
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 1. Run smoke test to verify everything works (<20s)
+python3 python/test_cp51_real_window_training_smoke.py
+
+# 2. Train ensemble on real windows (~6-10 minutes)
+PYTHONPATH=build:python python3 python/train_cp51_real_window_ensemble.py
+
+# 3. Evaluate closure (30-60 minutes, optional)
+PYTHONPATH=build:python python3 python/run_cp51_real_closure_report.py
+
+# Via CTest
+ctest -R real_window_training_smoke_cp51 --output-on-failure
+ctest -R real_window_closure_report_cp51 -V
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Status: ✓ IMPLEMENTATION COMPLETE
+
+CP5.1 successfully implements windowed ensemble training on real NPZ data:
+  • Leverages existing infrastructure (no new dependencies)
+  • Addresses CP5.0 domain shift problem
+  • Fast smoke test validates pipeline (<20s)
+  • Ready for nightly closure validation
+
+The implementation provides a path to CP5.0 closure by training the ensemble
+on actual real-world dynamics instead of synthetic approximations.
+
+Expected outcome: MPC call rate reduction from 100% to ≤30%, achieving
+hybrid controller performance benefits (2-4× speedup) on real data.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+For detailed information, see:
+  docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md

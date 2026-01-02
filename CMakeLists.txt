@@ -493,6 +493,79 @@ if(pybind11_FOUND)
     set_tests_properties(hybrid_controller_smoke_cp47 PROPERTIES TIMEOUT 60)
 endif()
 
+# CP4.7.3: Health gate smoke test (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME health_gate_smoke_cp47
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_health_gate_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(health_gate_smoke_cp47 PROPERTIES TIMEOUT 30)
+endif()
+
+# CP4.7.4: Health gate sliding-window smoke test (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME health_gate_window_smoke_cp47
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_health_gate_window_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(health_gate_window_smoke_cp47 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.7.5: Windowed end-to-end smoke test (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME windowed_end_to_end_smoke_cp475
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_windowed_end_to_end_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(windowed_end_to_end_smoke_cp475 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.7.6: Golden windows health gate smoke test (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME golden_health_gate_smoke_cp476
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp476_golden_health_gate_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(golden_health_gate_smoke_cp476 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.7.7: Golden-PASS windowed end-to-end test (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME golden_pass_windowed_cp477
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp477_windowed_end_to_end_goldens.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(golden_pass_windowed_cp477 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.7.8: Real NPZ health gate smoke test with hold-period mitigation (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME real_npz_health_smoke_cp478
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp478_real_npz_health_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(real_npz_health_smoke_cp478 PROPERTIES TIMEOUT 30)
+endif()
+
+# CP4.7.9: Golden dataset quality benchmark (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME golden_quality_benchmark_cp479
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp479_golden_quality_benchmark.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(golden_quality_benchmark_cp479 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP4.7.5: Windowed end-to-end validation (nightly only)
+if(pybind11_FOUND)
+    add_test(NAME windowed_end_to_end_cp475
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp47_hybrid_end_to_end_cp475.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(windowed_end_to_end_cp475 PROPERTIES TIMEOUT 1800)
+    set_tests_properties(windowed_end_to_end_cp475 PROPERTIES LABELS "nightly")
+endif()
+
 # CP4.7: Hybrid controller benchmark (nightly only)
 if(pybind11_FOUND)
     add_test(NAME hybrid_controller_benchmark_cp47
@@ -521,4 +594,43 @@ if(pybind11_FOUND)
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     set_tests_properties(hybrid_end_to_end_cp472 PROPERTIES TIMEOUT 1800)
     set_tests_properties(hybrid_end_to_end_cp472 PROPERTIES LABELS "nightly")
+endif()
+
+# CP4.7.7: Real NPZ triage report (nightly only)
+if(pybind11_FOUND)
+    add_test(NAME real_npz_triage_cp477
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/eval/cp477_real_npz_triage.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(real_npz_triage_cp477 PROPERTIES TIMEOUT 600)
+    set_tests_properties(real_npz_triage_cp477 PROPERTIES LABELS "nightly")
+endif()
+
+# CP4.7.9: Real NPZ window quality report (nightly only)
+if(pybind11_FOUND)
+    add_test(NAME real_window_quality_report_cp479
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/eval/cp479_real_window_quality_report.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(real_window_quality_report_cp479 PROPERTIES TIMEOUT 600)
+    set_tests_properties(real_window_quality_report_cp479 PROPERTIES LABELS "nightly")
+endif()
+
+# CP5.1: Real-NPZ windowed ensemble training smoke test (CI gate)
+if(pybind11_FOUND)
+    add_test(NAME real_window_training_smoke_cp51
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/test_cp51_real_window_training_smoke.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(real_window_training_smoke_cp51 PROPERTIES TIMEOUT 60)
+endif()
+
+# CP5.1: Real-NPZ windowed ensemble closure report (nightly only)
+if(pybind11_FOUND)
+    add_test(NAME real_window_closure_report_cp51
+             COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+                     python3 ${CMAKE_SOURCE_DIR}/python/run_cp51_real_closure_report.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(real_window_closure_report_cp51 PROPERTIES TIMEOUT 1800)
+    set_tests_properties(real_window_closure_report_cp51 PROPERTIES LABELS "nightly")
 endif()

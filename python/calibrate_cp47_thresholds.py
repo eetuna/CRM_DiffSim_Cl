@@ -26,6 +26,7 @@ from control.ilqr import iLQRSolver
 from models.ensemble_policy import EnsemblePolicy
 from models.recurrent_policy import GRUPolicy
 from data.npz_manifest import load_manifest
+from eval.cp47_health_gate import run_health_gate
 import crm_diff_py
 
 
@@ -408,7 +409,7 @@ def main():
     """Main calibration routine."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='CP4.7.1/CP4.7.2: Threshold Calibration')
+    parser = argparse.ArgumentParser(description='CP4.7.1/CP4.7.2/CP4.7.3: Threshold Calibration')
     parser.add_argument('--max_configs', type=int, default=None,
                        help='Maximum number of configurations to test')
     parser.add_argument('--max_seconds', type=int, default=None,
@@ -418,7 +419,7 @@ def main():
     args = parser.parse_args()
 
     print("="*60)
-    print("CP4.7.1/CP4.7.2: Threshold Calibration")
+    print("CP4.7.1/CP4.7.2/CP4.7.3: Threshold Calibration")
     print("="*60)
 
     # Load ensemble
@@ -443,9 +444,7 @@ def main():
         # Apply dataset limit
         datasets = datasets[:args.datasets_limit]
 
-        print(f"✓ Using {len(datasets)} datasets:")
-        for ds in datasets:
-            print(f"  - {ds.filename}")
+        print(f"✓ Loaded {len(datasets)} datasets")
 
     except Exception as e:
         print(f"✗ Failed to load datasets: {e}")
@@ -467,6 +466,58 @@ def main():
         'IntegrationStepSize': 0.5,  # Will be overridden by dataset
         'FinalValueOnly': True,
     }
+
+    # CP4.7.3: Run health gate first
+    print("\n[CP4.7.3: Running health gate...]")
+    health_report = run_health_gate(
+        datasets,
+        params_dict,
+        duration=2.0,
+        verbose=True,
+        output_json_path='./build/artifacts/cp47_health_report.json'
+    )
+
+    # Filter to valid datasets only
+    valid_indices = health_report['valid_datasets']
+    if not valid_indices:
+        print("\n" + "="*60)
+        print("CALIBRATION SKIPPED")
+        print("="*60)
+        print("Reason: No valid datasets found after health gate")
+        print(f"Total datasets tested: {health_report['summary']['total_datasets']}")
+        print(f"Valid datasets: {health_report['summary']['valid_count']}")
+        print(f"Invalid datasets: {health_report['summary']['invalid_count']}")
+
+        if health_report['summary']['failure_reasons']:
+            print("\nFailure reasons:")
+            for reason, count in health_report['summary']['failure_reasons'].items():
+                print(f"  - {reason}: {count}")
+
+        print("="*60)
+
+        # Write skipped marker to threshold files
+        output_dir = './build/artifacts'
+        os.makedirs(output_dir, exist_ok=True)
+
+        sweep_path = os.path.join(output_dir, 'cp47_threshold_sweep.json')
+        with open(sweep_path, 'w') as f:
+            json.dump({
+                'skipped_reason': 'no_valid_datasets_after_health_gate',
+                'health_report_summary': health_report['summary'],
+                'mpc_baseline': None,
+                'sweep_results': [],
+                'best_thresholds': None,
+                'n_passing': 0,
+                'n_total': 0
+            }, f, indent=2)
+        print(f"\n✓ Saved skipped marker: {sweep_path}")
+
+        return 0  # Exit 0 (not a failure, just skipped)
+
+    datasets = [datasets[i] for i in valid_indices]
+    print(f"\n✓ Using {len(datasets)} valid datasets:")
+    for ds in datasets:
+        print(f"  - {ds.filename}")
 
     # Define threshold ranges
     tau_low_range = [1e-4, 5e-4, 1e-3, 2e-3, 5e-3]
@@ -502,25 +553,53 @@ def main():
     best_path = os.path.join(output_dir, 'cp47_threshold_best.json')
 
     if results['best_thresholds'] is not None:
-        best_summary = {
-            'tau_low': results['best_thresholds']['tau_low'],
-            'tau_high': results['best_thresholds']['tau_high'],
-            'metrics': {
-                'mpc_call_rate': results['best_thresholds']['mpc_call_rate'],
-                'tracking_rmse': results['best_thresholds']['tracking_rmse'],
-                'speedup': results['best_thresholds']['speedup'],
-                'safety_violations': results['best_thresholds']['n_failures']
-            },
-            'acceptance': results['best_thresholds']['acceptance'],
-            'calibration_date': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'budget_exceeded': results['budget_exceeded']
-        }
+        # Verify MPC baseline is not NaN (CP4.7.3 requirement)
+        mpc_rmse = results['mpc_baseline']['avg_rmse']
+        if not np.isfinite(mpc_rmse):
+            print(f"\n✗ WARNING: MPC baseline RMSE is NaN/Inf: {mpc_rmse}")
+            print("  This should not happen after health gate - please investigate")
+            # Write error marker
+            best_summary = {
+                'skipped_reason': 'mpc_baseline_nan_after_health_gate',
+                'tau_low': None,
+                'tau_high': None,
+                'metrics': None,
+                'acceptance': None,
+                'calibration_date': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        else:
+            best_summary = {
+                'tau_low': results['best_thresholds']['tau_low'],
+                'tau_high': results['best_thresholds']['tau_high'],
+                'metrics': {
+                    'mpc_call_rate': results['best_thresholds']['mpc_call_rate'],
+                    'tracking_rmse': results['best_thresholds']['tracking_rmse'],
+                    'speedup': results['best_thresholds']['speedup'],
+                    'safety_violations': results['best_thresholds']['n_failures']
+                },
+                'acceptance': results['best_thresholds']['acceptance'],
+                'calibration_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'budget_exceeded': results['budget_exceeded']
+            }
 
         with open(best_path, 'w') as f:
             json.dump(best_summary, f, indent=2)
         print(f"✓ Saved best thresholds: {best_path}")
     else:
         print(f"⚠ No thresholds found (budget too tight)")
+        # Write placeholder with explicit skip reason
+        best_summary = {
+            'skipped_reason': 'budget_too_tight',
+            'tau_low': None,
+            'tau_high': None,
+            'metrics': None,
+            'acceptance': None,
+            'calibration_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'budget_exceeded': results.get('budget_exceeded', True)
+        }
+        with open(best_path, 'w') as f:
+            json.dump(best_summary, f, indent=2)
+        print(f"✓ Saved skipped marker: {best_path}")
 
     # Summary
     print("\n" + "="*60)

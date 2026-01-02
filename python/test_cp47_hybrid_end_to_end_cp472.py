@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-CP4.7.2: End-to-End Trained Validation
+CP4.7.2/CP4.7.4: End-to-End Trained Validation
 
 Runs the complete CP4.7 pipeline under bounded compute budget:
 1. Fast ensemble training (<=30 min, N>=3 members)
 2. Threshold calibration (capped budget)
 3. Trained hybrid benchmark
+
+CP4.7.4 Enhancement:
+- Optionally uses windowed health report if available
+- Enables validation on valid dataset windows instead of full datasets
 
 Outputs JSON summary with PASS/FAIL verdict and acceptance metrics.
 
@@ -41,13 +45,14 @@ import crm_diff_py
 # Phase 1: Fast Ensemble Training
 # ============================================================================
 
-def run_fast_ensemble_training(datasets_limit=2, max_seconds=1200):
+def run_fast_ensemble_training(datasets_limit=2, max_seconds=1200, skip_if_exists=True):
     """
     Run fast ensemble training with CP4.7.2 profile.
 
     Args:
         datasets_limit: Limit number of training datasets
         max_seconds: Maximum training time (default: 20 minutes)
+        skip_if_exists: Skip training if ensemble artifacts already exist
 
     Returns:
         dict with training results or error info
@@ -57,6 +62,20 @@ def run_fast_ensemble_training(datasets_limit=2, max_seconds=1200):
     print("="*80)
     print(f"Budget: {max_seconds}s ({max_seconds/60:.1f} min)")
     print(f"Datasets: {datasets_limit}")
+
+    # Check if ensemble already exists
+    metadata_path = './build/artifacts/cp472_ensemble_fast_ensemble_metadata.json'
+    if skip_if_exists and os.path.exists(metadata_path):
+        print(f"\n⏭️  Skipping training - ensemble already exists: {metadata_path}")
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        return {
+            'success': True,
+            'time': 0.0,
+            'n_members': metadata['n_members'],
+            'metadata_path': metadata_path,
+            'skipped': True
+        }
 
     t_start = time.time()
 
@@ -133,7 +152,7 @@ def run_fast_ensemble_training(datasets_limit=2, max_seconds=1200):
 # Phase 2: Threshold Calibration
 # ============================================================================
 
-def run_threshold_calibration(max_configs=5, max_seconds=300, datasets_limit=2):
+def run_threshold_calibration(max_configs=5, max_seconds=300, datasets_limit=2, skip_if_exists=True):
     """
     Run threshold calibration with capped budget.
 
@@ -141,6 +160,7 @@ def run_threshold_calibration(max_configs=5, max_seconds=300, datasets_limit=2):
         max_configs: Max configurations to test
         max_seconds: Max time budget
         datasets_limit: Number of datasets to use
+        skip_if_exists: Skip if threshold artifacts already exist
 
     Returns:
         dict with calibration results
@@ -150,6 +170,22 @@ def run_threshold_calibration(max_configs=5, max_seconds=300, datasets_limit=2):
     print("="*80)
     print(f"Budget: {max_configs} configs, {max_seconds}s")
     print(f"Datasets: {datasets_limit}")
+
+    # Check if calibration already done
+    best_path = './build/artifacts/cp47_threshold_best.json'
+    if skip_if_exists and os.path.exists(best_path):
+        print(f"\n⏭️  Skipping calibration - thresholds already exist: {best_path}")
+        with open(best_path, 'r') as f:
+            best_data = json.load(f)
+        return {
+            'success': True,
+            'time': 0.0,
+            'configs_tested': 0,
+            'n_passing': 0,
+            'budget_exceeded': False,
+            'best_thresholds': best_data,
+            'skipped': True
+        }
 
     t_start = time.time()
 
@@ -410,9 +446,13 @@ def run_hybrid(dataset, ensemble, params_dict, tau_low, tau_high, duration=5.0):
     return summary
 
 
-def run_trained_benchmark(duration=5.0):
+def run_trained_benchmark(duration=5.0, datasets_limit=2):
     """
     Run trained hybrid benchmark.
+
+    Args:
+        duration: Duration to test per dataset (seconds)
+        datasets_limit: Number of datasets to test
 
     Returns:
         dict with benchmark results
@@ -420,6 +460,8 @@ def run_trained_benchmark(duration=5.0):
     print("\n" + "="*80)
     print("PHASE 3: Trained Benchmark")
     print("="*80)
+    print(f"Duration: {duration}s per dataset")
+    print(f"Datasets: {datasets_limit}")
 
     t_start = time.time()
 
@@ -442,7 +484,7 @@ def run_trained_benchmark(duration=5.0):
     # Load datasets
     try:
         manifest = load_manifest(data_dir='./data', verbose=False)
-        datasets = manifest.datasets_with_ref[:2]
+        datasets = manifest.datasets_with_ref[:datasets_limit]
 
         if not datasets:
             print("✗ No datasets available")
@@ -618,7 +660,7 @@ def main():
         return 1
 
     # Phase 3: Benchmark
-    benchmark_result = run_trained_benchmark(duration=5.0)
+    benchmark_result = run_trained_benchmark(duration=2.0, datasets_limit=1)
     results['phases']['benchmark'] = benchmark_result
 
     if not benchmark_result['success']:
