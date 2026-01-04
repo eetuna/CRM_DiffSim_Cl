@@ -12,6 +12,7 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/workspaces/CRM_DiffSim_Cl/main/CRM_KinematicsTestFunctions.cpp" "CMakeFiles/CRMDYNTest.dir/main/CRM_KinematicsTestFunctions.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/main/CRM_KinematicsTestFunctions.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/numerical/minpack.cpp" "CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/numerical/minpack.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/numerical/minpack_DYN_Defs.cpp" "CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/numerical/minpack_DYN_Defs.cpp.o.d"
+  "/workspaces/CRM_DiffSim_Cl/src/CRM_BVPJacobian.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_BVPJacobian.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_BVPJacobian.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/src/CRM_BVPSolver.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_BVPSolver.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_BVPSolver.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/src/CRM_CatheterClass.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_CatheterClass.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_CatheterClass.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/src/CRM_DiffDynamics.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_DiffDynamics.cpp.o.d"
@@ -19,7 +20,9 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/workspaces/CRM_DiffSim_Cl/src/CRM_ForwardKinematics.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_ForwardKinematics.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_ForwardKinematics.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/src/CRM_IVPJacobian.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_IVPJacobian.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_IVPJacobian.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/src/CRM_IVPSolver.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_IVPSolver.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_IVPSolver.cpp.o.d"
+  "/workspaces/CRM_DiffSim_Cl/src/CRM_ReferenceHarness.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_ReferenceHarness.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_ReferenceHarness.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/src/CRM_SupportFunctions.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_SupportFunctions.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_SupportFunctions.cpp.o.d"
+  "/workspaces/CRM_DiffSim_Cl/src/CRM_TrueLegacyDynamics.cpp" "CMakeFiles/CRMDYNTest.dir/src/CRM_TrueLegacyDynamics.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CRM_TrueLegacyDynamics.cpp.o.d"
   "/workspaces/CRM_DiffSim_Cl/src/CoilDynamics_Defs.cpp" "CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o" "gcc" "CMakeFiles/CRMDYNTest.dir/src/CoilDynamics_Defs.cpp.o.d"
   )
 

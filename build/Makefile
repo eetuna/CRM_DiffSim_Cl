@@ -454,6 +454,36 @@ python/crm_bindings.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/crm_diff_py.dir/build.make CMakeFiles/crm_diff_py.dir/python/crm_bindings.cpp.s
 .PHONY : python/crm_bindings.cpp.s
 
+src/CRM_BVPJacobian.o: src/CRM_BVPJacobian.cpp.o
+.PHONY : src/CRM_BVPJacobian.o
+
+# target to build an object file
+src/CRM_BVPJacobian.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_BVPJacobian.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_BVPJacobian.cpp.o
+.PHONY : src/CRM_BVPJacobian.cpp.o
+
+src/CRM_BVPJacobian.i: src/CRM_BVPJacobian.cpp.i
+.PHONY : src/CRM_BVPJacobian.i
+
+# target to preprocess a source file
+src/CRM_BVPJacobian.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_BVPJacobian.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_BVPJacobian.cpp.i
+.PHONY : src/CRM_BVPJacobian.cpp.i
+
+src/CRM_BVPJacobian.s: src/CRM_BVPJacobian.cpp.s
+.PHONY : src/CRM_BVPJacobian.s
+
+# target to generate assembly for a file
+src/CRM_BVPJacobian.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_BVPJacobian.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_BVPJacobian.cpp.s
+.PHONY : src/CRM_BVPJacobian.cpp.s
+
 src/CRM_BVPSolver.o: src/CRM_BVPSolver.cpp.o
 .PHONY : src/CRM_BVPSolver.o
 
@@ -664,6 +694,36 @@ src/CRM_IVPSolver.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_IVPSolver.cpp.s
 .PHONY : src/CRM_IVPSolver.cpp.s
 
+src/CRM_ReferenceHarness.o: src/CRM_ReferenceHarness.cpp.o
+.PHONY : src/CRM_ReferenceHarness.o
+
+# target to build an object file
+src/CRM_ReferenceHarness.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_ReferenceHarness.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_ReferenceHarness.cpp.o
+.PHONY : src/CRM_ReferenceHarness.cpp.o
+
+src/CRM_ReferenceHarness.i: src/CRM_ReferenceHarness.cpp.i
+.PHONY : src/CRM_ReferenceHarness.i
+
+# target to preprocess a source file
+src/CRM_ReferenceHarness.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_ReferenceHarness.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_ReferenceHarness.cpp.i
+.PHONY : src/CRM_ReferenceHarness.cpp.i
+
+src/CRM_ReferenceHarness.s: src/CRM_ReferenceHarness.cpp.s
+.PHONY : src/CRM_ReferenceHarness.s
+
+# target to generate assembly for a file
+src/CRM_ReferenceHarness.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_ReferenceHarness.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_ReferenceHarness.cpp.s
+.PHONY : src/CRM_ReferenceHarness.cpp.s
+
 src/CRM_SupportFunctions.o: src/CRM_SupportFunctions.cpp.o
 .PHONY : src/CRM_SupportFunctions.o
 
@@ -693,6 +753,36 @@ src/CRM_SupportFunctions.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_SupportFunctions.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_SupportFunctions.cpp.s
 .PHONY : src/CRM_SupportFunctions.cpp.s
+
+src/CRM_TrueLegacyDynamics.o: src/CRM_TrueLegacyDynamics.cpp.o
+.PHONY : src/CRM_TrueLegacyDynamics.o
+
+# target to build an object file
+src/CRM_TrueLegacyDynamics.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_TrueLegacyDynamics.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_TrueLegacyDynamics.cpp.o
+.PHONY : src/CRM_TrueLegacyDynamics.cpp.o
+
+src/CRM_TrueLegacyDynamics.i: src/CRM_TrueLegacyDynamics.cpp.i
+.PHONY : src/CRM_TrueLegacyDynamics.i
+
+# target to preprocess a source file
+src/CRM_TrueLegacyDynamics.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_TrueLegacyDynamics.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_TrueLegacyDynamics.cpp.i
+.PHONY : src/CRM_TrueLegacyDynamics.cpp.i
+
+src/CRM_TrueLegacyDynamics.s: src/CRM_TrueLegacyDynamics.cpp.s
+.PHONY : src/CRM_TrueLegacyDynamics.s
+
+# target to generate assembly for a file
+src/CRM_TrueLegacyDynamics.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMCPPLib.dir/build.make CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMDYNTest.dir/build.make CMakeFiles/CRMDYNTest.dir/src/CRM_TrueLegacyDynamics.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/CRMTest.dir/build.make CMakeFiles/CRMTest.dir/src/CRM_TrueLegacyDynamics.cpp.s
+.PHONY : src/CRM_TrueLegacyDynamics.cpp.s
 
 src/CoilDynamics_Defs.o: src/CoilDynamics_Defs.cpp.o
 .PHONY : src/CoilDynamics_Defs.o
@@ -980,6 +1070,9 @@ help:
 	@echo "... python/crm_bindings.o"
 	@echo "... python/crm_bindings.i"
 	@echo "... python/crm_bindings.s"
+	@echo "... src/CRM_BVPJacobian.o"
+	@echo "... src/CRM_BVPJacobian.i"
+	@echo "... src/CRM_BVPJacobian.s"
 	@echo "... src/CRM_BVPSolver.o"
 	@echo "... src/CRM_BVPSolver.i"
 	@echo "... src/CRM_BVPSolver.s"
@@ -1001,9 +1094,15 @@ help:
 	@echo "... src/CRM_IVPSolver.o"
 	@echo "... src/CRM_IVPSolver.i"
 	@echo "... src/CRM_IVPSolver.s"
+	@echo "... src/CRM_ReferenceHarness.o"
+	@echo "... src/CRM_ReferenceHarness.i"
+	@echo "... src/CRM_ReferenceHarness.s"
 	@echo "... src/CRM_SupportFunctions.o"
 	@echo "... src/CRM_SupportFunctions.i"
 	@echo "... src/CRM_SupportFunctions.s"
+	@echo "... src/CRM_TrueLegacyDynamics.o"
+	@echo "... src/CRM_TrueLegacyDynamics.i"
+	@echo "... src/CRM_TrueLegacyDynamics.s"
 	@echo "... src/CoilDynamics_Defs.o"
 	@echo "... src/CoilDynamics_Defs.i"
 	@echo "... src/CoilDynamics_Defs.s"

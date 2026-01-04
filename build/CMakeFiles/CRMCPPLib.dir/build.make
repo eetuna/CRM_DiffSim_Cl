@@ -181,10 +181,52 @@ CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/CRM_DiffSim_Cl/src/CRM_DiffDynamics.cpp -o CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.s
 
+CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o: CMakeFiles/CRMCPPLib.dir/flags.make
+CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o: ../src/CRM_TrueLegacyDynamics.cpp
+CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o: CMakeFiles/CRMCPPLib.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o -MF CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o.d -o CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o -c /workspaces/CRM_DiffSim_Cl/src/CRM_TrueLegacyDynamics.cpp
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /workspaces/CRM_DiffSim_Cl/src/CRM_TrueLegacyDynamics.cpp > CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.i
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/CRM_DiffSim_Cl/src/CRM_TrueLegacyDynamics.cpp -o CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.s
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o: CMakeFiles/CRMCPPLib.dir/flags.make
+CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o: ../src/CRM_BVPJacobian.cpp
+CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o: CMakeFiles/CRMCPPLib.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o -MF CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o.d -o CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o -c /workspaces/CRM_DiffSim_Cl/src/CRM_BVPJacobian.cpp
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /workspaces/CRM_DiffSim_Cl/src/CRM_BVPJacobian.cpp > CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.i
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/CRM_DiffSim_Cl/src/CRM_BVPJacobian.cpp -o CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.s
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o: CMakeFiles/CRMCPPLib.dir/flags.make
+CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o: ../src/CRM_ReferenceHarness.cpp
+CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o: CMakeFiles/CRMCPPLib.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o -MF CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o.d -o CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o -c /workspaces/CRM_DiffSim_Cl/src/CRM_ReferenceHarness.cpp
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /workspaces/CRM_DiffSim_Cl/src/CRM_ReferenceHarness.cpp > CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.i
+
+CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/CRM_DiffSim_Cl/src/CRM_ReferenceHarness.cpp -o CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.s
+
 CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o: CMakeFiles/CRMCPPLib.dir/flags.make
 CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o: ../numerical/minpack.cpp
 CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o: CMakeFiles/CRMCPPLib.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o -MF CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o.d -o CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o -c /workspaces/CRM_DiffSim_Cl/numerical/minpack.cpp
 
 CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.i: cmake_force
@@ -198,7 +240,7 @@ CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.s: cmake_force
 CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o: CMakeFiles/CRMCPPLib.dir/flags.make
 CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o: ../numerical/minpack_DYN_Defs.cpp
 CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o: CMakeFiles/CRMCPPLib.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o -MF CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o.d -o CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o -c /workspaces/CRM_DiffSim_Cl/numerical/minpack_DYN_Defs.cpp
 
 CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.i: cmake_force
@@ -212,7 +254,7 @@ CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.s: cmake_force
 CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o: CMakeFiles/CRMCPPLib.dir/flags.make
 CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o: ../src/CoilDynamics_Defs.cpp
 CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o: CMakeFiles/CRMCPPLib.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o -MF CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o.d -o CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o -c /workspaces/CRM_DiffSim_Cl/src/CoilDynamics_Defs.cpp
 
 CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.i: cmake_force
@@ -233,6 +275,9 @@ CRMCPPLib_OBJECTS = \
 "CMakeFiles/CRMCPPLib.dir/src/CRM_SupportFunctions.cpp.o" \
 "CMakeFiles/CRMCPPLib.dir/src/CRM_DiffEquilibrium.cpp.o" \
 "CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.o" \
+"CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o" \
+"CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o" \
+"CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o" \
 "CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o" \
 "CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o" \
 "CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o"
@@ -248,12 +293,15 @@ libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CRM_CatheterClass.cpp.o
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CRM_SupportFunctions.cpp.o
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CRM_DiffEquilibrium.cpp.o
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CRM_DiffDynamics.cpp.o
+libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CRM_TrueLegacyDynamics.cpp.o
+libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CRM_BVPJacobian.cpp.o
+libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CRM_ReferenceHarness.cpp.o
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/numerical/minpack.cpp.o
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/numerical/minpack_DYN_Defs.cpp.o
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/src/CoilDynamics_Defs.cpp.o
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/build.make
 libCRMCPPLib.a: CMakeFiles/CRMCPPLib.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Linking CXX static library libCRMCPPLib.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/workspaces/CRM_DiffSim_Cl/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Linking CXX static library libCRMCPPLib.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/CRMCPPLib.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/CRMCPPLib.dir/link.txt --verbose=$(VERBOSE)
 

@@ -37,6 +37,12 @@ set(CRMSOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffEquilibrium.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffDynamics.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffDynamics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_TrueLegacyDynamics.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_TrueLegacyDynamics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_BVPJacobian.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_BVPJacobian.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_ReferenceHarness.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_ReferenceHarness.cpp
 
     ${CMAKE_CURRENT_SOURCE_DIR}/numerical/minpack.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/numerical/minpack_TemplateDefinitions.hpp
