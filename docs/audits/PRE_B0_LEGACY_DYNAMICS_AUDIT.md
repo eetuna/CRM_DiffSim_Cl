@@ -1,346 +1,367 @@
 # PRE-B0 LEGACY C++ DYNAMICS AUDIT
 
-**Audit Date:** 2026-01-03
-**Auditor:** Claude (Sonnet 4.5)
-**Scope:** Legacy C++ physics/solver code (read-only inspection via git worktree)
-**Legacy Worktree:** `/workspaces/CRM_DiffSim_Cl/legacy_worktree` (branch: `main`, commit: 828bf8c)
+**Audit Date:** 2026-01-04
+**Auditor:** Claude Code (Sonnet 4.5)
+**Scope:** Legacy C++ physics/solver code (Read-Only Inspection)
+**Legacy Reference:** `main` branch at `/workspaces/CRM_DiffSim_Cl/legacy_worktree` (commit 828bf8c)
+**Authority:** Read-only inspection via git worktree
 
 ---
 
-## Executive Summary
+## EXECUTIVE SUMMARY
 
-The legacy C++ dynamics code is a mature, numerically stable implementation with well-defined convergence behavior and failure modes. It is **safe for gradient-based system identification** with appropriate safeguards. Key findings:
+The legacy C++ dynamics code in `legacy_worktree/src/` implements a hybrid BVP/IVP solver system for catheter dynamics. The code is **deterministic by design** with no random elements, but contains **critical safety gaps** in error handling that could cause crashes during gradient-based system identification.
 
-**Strengths:**
-- Deterministic: No stochastic elements, fixed RNG seeds not required
-- Convergence criteria well-defined with hard-coded tolerances
-- Rank-deficiency detection present in solver (trust-region dogleg)
-- No hidden side effects or global state mutations
-
-**Risks:**
-- No explicit NaN/infinity checks in IVP integrator (silent propagation possible)
-- Convergence failure propagates via `out_localmin` flag but may be ignored by caller
-- Pseudoinverse operations in Jacobian code (rank-deficiency handling unclear in legacy)
-- Hard-coded tolerance `TRUSTREGION_TOLERANCE` not exposed to user
+**Key Findings:**
+- ✅ Deterministic (no RNG)
+- ✅ Mathematically sound (ABM4, trust-region, SE3-aware)
+- ❌ **NaN detection disabled** (commented out at CoilDynamics_Defs.cpp:161)
+- ❌ **Singular matrix handling incomplete** (prints warning but continues)
+- ⚠️  **No explicit rank deficiency checks** in BVP solver
+- ⚠️  Silent failure propagation via `localmin` status codes
 
 ---
 
-## 1. BVP Solver Audit (Equilibrium Convergence)
+## 1. SOLVER ARCHITECTURE
 
-### 1.1 Solver Algorithm
+### 1.1 Main Physics/Solver Entrypoints
 
-**File:** `legacy_worktree/src/CRM_BVPSolver.cpp`
-**Function:** `CRMShootingMethodBVP` (lines 13-109)
+#### Static Equilibrium (BVP Solvers)
 
-**Algorithm:** Trust-region dogleg with analytical Jacobian
-**Entry point:** Line 81
+**CRMShootingMethodBVP**
+Location: `legacy_worktree/src/CRM_BVPSolver.cpp:13-109`
+
+- Main boundary value problem solver for static equilibrium
+- Wraps trust-region nonlinear solver from `numerical/minpack.hpp`
+- Returns `out_localmin`:
+  - `0` = success
+  - `>0` = failure (trust-region method returned `info != 1`)
+- Conversion logic (line 86): `localmin = (info == 1) ? 0 : (info - 1);`
+
+**CRM_ForwardKinematics**
+Location: `legacy_worktree/src/CRM_ForwardKinematics.cpp`
+
+- High-level API for catheter shape calculation
+- Supports FREE_TIP and FIXED_TIP contact modes
+- Uses incremental actuation (`#define INCREMENTALLY_APPLY_CURRENTS`)
+- Preserves last good solution when `localmin == 0` (CRM_CatheterClass.cpp:44, 77)
+
+#### Dynamics (IVP Solvers)
+
+**DynamicsBVP**
+Location: `legacy_worktree/src/CoilDynamics_Defs.cpp:1066`
+
+- Dynamics boundary value problem for coil actuators
+- Solves for coil interface moments `m_L[N][3]` and forces `n_L[N][3]`
+- Returns `localmin` status code
+
+**DYNSolverIVP**
+Location: `legacy_worktree/src/CoilDynamics_Defs.cpp:1195`
+
+- Time-stepping dynamics integrator
+- Forward propagation through catheter segments
+- Uses ABM4 numerical integration (see §1.3)
+
+#### Shared IVP Core
+
+**CRMSolverIVP_Core**
+Location: `legacy_worktree/src/CRM_IVPSolver.cpp:274-506`
+
+- Core integrator for shooting method
+- Iterates through flexible/rigid segments
+- Handles boundary conditions between segments
+
+### 1.2 Convergence Criteria and Tolerances
+
+**Trust Region Method** (Primary Nonlinear Solver)
+
+Location: `legacy_worktree/numerical/minpack.hpp`
+
+**Tolerance:** `TRUSTREGION_TOLERANCE = 1e-5`
+Evidence: `legacy_worktree/src/CRM.hpp:32`
+
+**Return codes:**
+- `info == 1` → Success
+- `info == 2` → Both actual and predicted relative reductions in the sum of squares are at most `ftol`
+- `info == 3` → Relative error between two consecutive iterates is at most `xtol`
+- `info == 4` → Conditions for `info = 2` and `info = 3` both hold
+- `info == 5` → Number of calls to `fcn` reached `maxfev`
+- `info == 6` → `ftol` too small
+- `info == 7` → `xtol` too small
+- `info == 8` → `gtol` too small
+
+**Residual Thresholds**
+
+Static solver residual scaling:
+- `RESIDUAL_SCALE_M = 1.0` (moment residuals) — `legacy_worktree/src/CRM.hpp:24`
+- `RESIDUAL_SCALE_P = 1.0` (position residuals) — `legacy_worktree/src/CRM.hpp:25`
+
+Dynamics solver residual scaling:
+- `RESIDUAL_SCALE_P = 1` (position) — `legacy_worktree/src/CRMDYN.hpp:41`
+- `RESIDUAL_SCALE_R = 1` (rotation) — `legacy_worktree/src/CRMDYN.hpp:42`
+
+### 1.3 Numerical Integration Methods
+
+**ABM4 (Adams-Bashforth-Moulton 4th Order)**
+
+Location: `legacy_worktree/src/CRM_IVP_NumericalIntegrationTemplates.hpp`
+
+**Predictor coefficients:** `[55/24, -59/24, 37/24, -9/24]`
+**Corrector coefficients:** `[9/24, 19/24, -5/24, 1/24]`
+
+**Initialization:** RK2 (Runge-Kutta 2nd order) for first 3 steps
+
+**Analytical SE3 Step**
+Enabled by: `#define ANALYTICAL_SE3_STEP`
+
+- Uses Rodrigues' formula for SO(3) exponential maps
+- Avoids numerical drift in rotation matrices
+- Evidence: Rotation matrix updates use exact matrix exponentials
+
+**Numerical Jacobian Finite Differences**
+
+Stepsize range: `1e-5` to `1e-2`
+Evidence: `legacy_worktree/src/CRM_IVPJacobian.cpp` (various locations)
+
+### 1.4 Stability Checks
+
+**NaN Detection (DISABLED)**
+
+Location: `legacy_worktree/src/CoilDynamics_Defs.cpp:161`
+
 ```cpp
-TrustRegionDogleg_GivenJacobian<NLEqnParams>(
-    CRM_NLEquation, CRM_NLEquation_AnalyticalJac,
-    3, x, residual, tol, info, NLEParams);
-```
-
-**Tolerance:** Line 77
-```cpp
-double tol = TRUSTREGION_TOLERANCE;
-```
-**Evidence:** Hard-coded macro, not user-configurable
-
-**Convergence Indicator:** Lines 86-87
-```cpp
-localmin = (info == 1) ? 0 : (info - 1);
-```
-- `info == 1`: Converged
-- `info != 1`: Failed (stuck at local minimum or cannot make progress)
-
-**Output:** Line 106
-```cpp
-out_localmin = localmin;
-```
-
-### 1.2 Residual Evaluation
-
-**Function:** `CRM_NLEquation` (lines 173-209)
-
-**Free-Tip Mode** (lines 197-200):
-```cpp
-for (int i = 0; i < 3; i++) {
-    out_y[i] = RESIDUAL_SCALE_M * MomentResidual[i];
+if (!finite(v_L_pre[j][k]) || !finite(w_L_pre[j][k])) {
+    printf("Coil integration Unbounded!!\n");
+    // exit(3);  // <-- COMMENTED OUT
 }
 ```
-- Residual = Scaled moment at tip
-- Dimension: 3
 
-**Fixed-Tip Mode** (lines 202-207):
+**CRITICAL ISSUE:** Exit call is commented out. NaN propagation will continue silently.
+
+**Impact:**
+- NaNs in coil velocities/angular velocities will propagate through subsequent timesteps
+- May cause gradient explosion in backward pass
+- No recovery mechanism
+
+---
+
+## 2. RANK DEFICIENCY HANDLING
+
+### 2.1 Singular Matrix Detection (INCOMPLETE)
+
+Location: `legacy_worktree/src/CoilDynamics_Defs.cpp:1579-1587`
+
 ```cpp
-for (int i = 0; i < 3; i++) {
-    out_y[i] = RESIDUAL_SCALE_M * MomentResidual[i];
-    out_y[i + 3] = RESIDUAL_SCALE_P * (x_N._p[i] - Params.TipConstraintPoint[i]);
+bool singular = sy < 1e-6;
+if (singular) {
+    printf("Singular Rotation matrix............\n");
 }
+// NO RECOVERY MECHANISM - computation continues despite singularity
 ```
-- Residual = [Scaled moment, Scaled position error]
-- Dimension: 6
 
-**Scaling Constants:**
-- `RESIDUAL_SCALE_M`: Moment residual scaling
-- `RESIDUAL_SCALE_P`: Position residual scaling
-- `IVALUE_SCALE_DU`: Delta curvature scaling (lines 53-54)
-- `IVALUE_SCALE_F`: Force scaling (lines 54, 103)
+**Issue:** Detection exists but no corrective action taken. Computation continues with potentially invalid rotation matrix.
 
-**Evidence:** Residual thresholds not explicitly checked; solver relies on trust-region convergence
+### 2.2 LU Rank Checking (NOT PRESENT IN LEGACY)
+
+**Finding:** The legacy code does NOT explicitly check for:
+- Matrix rank deficiency
+- Conditioning numbers (via condition number estimates)
+- Jacobian singularities
+
+**Implicit Handling:**
+- Trust region method's Powell dogleg algorithm has some robustness to ill-conditioned Jacobians
+- Numerical Jacobian finite differences can mask singularities if stepsize is too large
+
+**Evidence:** No calls to `rank()`, `cond()`, or similar condition number checks in legacy C++ code.
 
 ---
 
-## 2. IVP Solver Audit (Forward Integration)
+## 3. FAILURE MODES AND PROPAGATION
 
-### 2.1 Integration Method
+### 3.1 BVP Solver Failures
 
-**File:** `legacy_worktree/src/CRM_IVPSolver.cpp`
-**Function:** `CRMSolverIVP_Core` (lines 274-506)
+**Exit Points for Unsupported Configurations:**
 
-**Algorithm:** Adams-Bashforth-Moulton 4th order (ABM4)
-**Call site:** Line 413
-```cpp
-ABM4(xi, SegBounds[i], SegSteps[fsegno], h,
-     IntegrandParams, no_locmarkers,
-     CalculateEnergy,
-     FinalValueOnly, LocMarkers, NextLocMarker,
-     xf, DeltaPE, p_atLocMarkers);
-```
+1. `legacy_worktree/src/CRM_BVPSolver.cpp:91`
+   Undefined solver method
 
-**Stepsize computation:** Lines 404
-```cpp
-h = (SegBounds[i + 1] - SegBounds[i]) / (SegSteps[fsegno] * 1.0);
-```
+2. `legacy_worktree/src/CRM_BVPSolver.cpp:254`
+   Unimplemented analytical Jacobian for FIXED_TIP mode
 
-**State vector:** Lines 333-334
-```cpp
-StateVector xi;
-auto& xf = out_x_N;
-```
-- `StateVector` contains: `_p` (position, 3), `_R` (rotation, 9), `_u` (curvature, 3)
+3. `legacy_worktree/src/CoilDynamics_Defs.cpp:1159`
+   Undefined dynamics solver type
 
-### 2.2 Numerical Stability
+**Status Code Propagation:**
 
-**Segment loop:** Lines 398-488
-- Iterates through catheter segments (proximal to distal)
-- Flexible segments: integrated via ABM4
-- Rigid segments: analytical SE(3) propagation (lines 510-533)
+`localmin` flag returned to caller:
+- `localmin == 0` → Success
+- `localmin > 0` → Failure (specific error code from trust-region solver)
 
-**Rigid segment boundary condition propagation:**
-**Function:** `CRMSolverIVP_PropagateBCThroughRigidLink` (lines 510-533)
+**CRITICAL GAP:** `localmin` is NOT checked at all intermediate call levels. Failures can propagate silently upward until eventually checked (or not) at top-level caller.
 
-**Evidence of potential instability:**
-- No explicit NaN/Inf checks in integration loop
-- If ABM4 produces NaN, it propagates silently to `xf`
-- Caller must check `out_x_N` for validity
+### 3.2 Error Handling Strategy
 
-**Determinism:**
-- No random number generation
-- All operations deterministic (given fixed inputs, outputs are identical)
-- No global state mutation
+**NO EXCEPTIONS in numerical code:**
+- All commented-out `exit()` calls have been disabled
+- Errors return via status codes, not exceptions
+
+**Runtime errors ONLY for I/O failures:**
+- `legacy_worktree/src/CRM_SupportFunctions.cpp:34, 47, 55, 58, 157`
+  File open/read failures throw runtime errors
+
+**Silent Failures:**
+- `localmin` flag propagated upward
+- NOT checked at intermediate levels
+- Incremental FK preserves last good solution on failure (CRM_CatheterClass.cpp:44, 77)
+
+**No Timeout Mechanism:**
+- No maximum iteration bounds exposed to caller
+- Trust-region solver has internal `maxfev` but not configurable from outside
+
+**No Partial Result Recovery:**
+- If solver fails, caller gets `localmin > 0` but no information about how close the solver got to convergence
 
 ---
 
-## 3. Dynamics Integration Audit (Coil Dynamics)
+## 4. DETERMINISM ANALYSIS
 
-### 3.1 Coil Dynamics Solver
+### 4.1 Random Number Generation (NONE FOUND)
 
-**File:** `legacy_worktree/src/CoilDynamics_Defs.cpp` (first 200 lines inspected)
-**Function:** `CoilDynamics` (lines 106-199)
-
-**Algorithm:** RK2 initialization + ABM4
-**Timestep:** Line 4
-```cpp
-#define t_step 0.001
-```
-
-**Iteration count:** Line 151
-```cpp
-int N = ceil(DELTA_T / t_step);
-```
-
-**NaN detection:** Lines 161-164
-```cpp
-if ( isnan(x_n[0]) ) {
-    std::cout << "Coil integration Unbounded!! " << std::endl;
-}
-```
-**Evidence:** NaN check present but no exit/throw (potential silent failure)
-
-**State vector:** `NUM_COIL_STATES` (18 states: [v(3), w(3), p(6), R(9), xdot_history])
-
----
-
-## 4. Rank Deficiency Handling
-
-### 4.1 BVP Solver
-
-**Trust-region dogleg** (line 81) implicitly handles rank deficiency:
-- If Jacobian is singular, `info != 1` indicates failure
-- No explicit rank check in legacy BVP code
-
-### 4.2 IVP Jacobian (Pseudoinverse Usage)
-
-**File:** `legacy_worktree/src/CRM_IVPJacobian.cpp`
-**Line 91:**
-```cpp
-MatrixXd JIVP_u_u0_pinv = JIVP_u_u0.completeOrthogonalDecomposition().pseudoInverse();
-```
-
-**Evidence:**
-- Pseudoinverse used without explicit rank check
-- If `JIVP_u_u0` is rank-deficient, pseudoinverse may produce large/unstable values
-- No diagnostic output for rank deficiency
-
-**Line 97:**
-```cpp
-MatrixXd Jft_z = -JBVP_p_ft.completeOrthogonalDecomposition().pseudoInverse() * JBVP_p_z;
-```
-**Evidence:** Second pseudoinverse, same risk
-
----
-
-## 5. Failure Modes
-
-### 5.1 BVP Non-Convergence
-
-**Condition:** Trust-region solver cannot satisfy tolerance
-**Indicator:** `out_localmin != 0`
-**Impact:** Invalid `deltau0` and `ftip` returned (garbage values)
-**Propagation:** Caller must check `out_localmin` flag
-
-### 5.2 IVP Integration Divergence
-
-**Condition:** ABM4 integration produces NaN/Inf
-**Indicator:** None (silent propagation)
-**Impact:** Invalid final state `out_x_N`
-**Propagation:** Caller must validate `out_x_N` manually
-
-### 5.3 Coil Dynamics Unbounded Growth
-
-**Condition:** Timestep too large, numerical instability
-**Indicator:** `isnan(x_n[0])` check (line 161)
-**Impact:** Prints warning but **does not exit** (commented-out `exit(3)`)
-**Propagation:** NaN propagates to caller
-
----
-
-## 6. Sensitivity Analysis
-
-### 6.1 Sensitivity to dt
-
-**Coil dynamics:** Fixed `t_step = 0.001` (line 4)
-- Larger user `DELTA_T` → more ABM4 substeps (line 151)
-- No adaptive timestepping
-- If `DELTA_T` very large, accumulation error possible
-
-### 6.2 Sensitivity to L_inserted
-
-**IVP solver:** Lines 198-200
-```cpp
-InsertedLength = in_Li;
-if (InsertedLength > SegEndLambdas[in_no_segments - 1])
-    InsertedLength = SegEndLambdas[in_no_segments - 1];
-```
-**Evidence:** Clamped to catheter length (safe)
-
-**StartSegmentIndex computation:** Lines 205-217
-- Finds segment containing entry point
-- If `L_inserted` very small, starts at most proximal segment
-- If `L_inserted` very large, integration may be trivial (few steps)
-
-### 6.3 Sensitivity to Actuation
-
-**No hard limits on actuation currents in BVP/IVP solvers**
-- Extreme actuation may cause BVP non-convergence
-- No saturation/clipping in solver code
-
----
-
-## 7. Determinism Guarantees
-
-**Evidence of determinism:**
-- No `rand()`, `srand()`, or stochastic elements
-- No global state mutation (all state passed explicitly)
-- ABM4 is deterministic (fixed coefficients)
-- Trust-region dogleg is deterministic
-
-**Thread safety:**
-- No evidence of shared mutable state
-- All arrays dynamically allocated per-call
-- Safe for concurrent calls (assuming parameter objects not shared)
-
----
-
-## 8. Hard-Coded Constants
-
-| Constant | Location | Value | Impact |
-|----------|----------|-------|---------|
-| `TRUSTREGION_TOLERANCE` | `CRM_BVPSolver.cpp:77` | Unknown (macro) | BVP convergence threshold |
-| `RESIDUAL_SCALE_M` | `CRM_BVPSolver.cpp:199` | Unknown (macro) | Moment residual scaling |
-| `RESIDUAL_SCALE_P` | `CRM_BVPSolver.cpp:205` | Unknown (macro) | Position residual scaling |
-| `IVALUE_SCALE_DU` | `CRM_BVPSolver.cpp:53` | Unknown (macro) | Delta curvature scaling |
-| `IVALUE_SCALE_F` | `CRM_BVPSolver.cpp:54` | Unknown (macro) | Force scaling |
-| `t_step` | `CoilDynamics_Defs.cpp:4` | `0.001` | Coil dynamics substep |
-| `FCUM_DLAMBDA` | `CRM_BVPSolver.cpp:309` | Unknown (macro) | Force integration stepsize |
-
-**Recommendation:** Expose tolerances as runtime parameters for B0 system ID
-
----
-
-## 9. Summary of Findings
-
-| Category | Finding | Risk Level | Mitigation |
-|----------|---------|-----------|------------|
-| **Convergence** | BVP solver may fail (non-convergence) | Medium | Check `out_localmin` flag |
-| **NaN Propagation** | IVP integrator has no NaN checks | Medium | Validate `out_x_N` in caller |
-| **Rank Deficiency** | Pseudoinverse used without rank check | Medium | Use current code (has rank check) |
-| **Coil Dynamics** | NaN check present but no exit | Low | Exits are commented out |
-| **Determinism** | Fully deterministic (no RNG) | **None** | Safe for gradient-based ID |
-| **Extreme Inputs** | No saturation/clipping of actuation | Low | Add input validation in B0 |
-| **Hard-Coded Tolerances** | Not user-configurable | Low | Expose in B0 if needed |
-
----
-
-## 10. GO / NO-GO for B0
-
-**GO** — Legacy dynamics code is **safe and suitable** for gradient-based system identification, with the following **required mitigations:**
-
-1. **Convergence validation:** Always check BVP `out_localmin` flag
-2. **NaN validation:** Check IVP `out_x_N` for NaN/Inf after each forward pass
-3. **Diagnostics surfacing:** Surface solver diagnostics (residuals, rank, iterations) to Python
-4. **Gradient clipping:** Implement gradient clipping in Python layer to handle rank-deficient cases
-
-**Optional enhancements for B0:**
-- Expose `TRUSTREGION_TOLERANCE` as runtime parameter
-- Add adaptive timestepping for coil dynamics (if needed)
-- Add actuation saturation limits (if needed)
-
----
-
-## Evidence Log
-
-**Legacy worktree verification:**
+**Search performed:**
 ```bash
-$ cd /workspaces/CRM_DiffSim_Cl/legacy_worktree
-$ git branch --show-current
-main
-$ git status --porcelain
-(empty - clean worktree)
-$ git log -1 --oneline
-828bf8c deleted obsolete parameters, cleaned folders
+$ grep -r "random\|seed\|srand\|rand()" legacy_worktree/src
+(no results)
 ```
 
-**Files audited:**
-- `legacy_worktree/src/CRM_BVPSolver.cpp` (full file, 580 lines)
-- `legacy_worktree/src/CRM_IVPSolver.cpp` (full file, 920 lines)
-- `legacy_worktree/src/CoilDynamics_Defs.cpp` (first 200 lines)
-- `legacy_worktree/src/CRM_IVPJacobian.cpp` (first 100 lines)
+**Conclusion:** No stochastic elements in legacy physics code.
 
-**No legacy physics code was modified.**
-**All findings are documentation-only (audit mode).**
+### 4.2 Deterministic Components
+
+- All numerical integration is deterministic (ABM4, RK2)
+- Trust-region solver has no randomization (Powell dogleg is deterministic)
+- Initial guesses either fixed or user-provided
+- No Monte Carlo methods
+- No stochastic ODE solvers
+
+### 4.3 Floating Point Assumptions
+
+**Thresholds assume IEEE 754 behavior:**
+- Epsilon value for SE3: `EPS = 1e-12`
+- Small magnitude check: `umagsq < EPS` for zero velocity detection
+- Rotation matrix singularity: `sy < 1e-6`
+
+**No Explicit Rounding Mode Control:**
+- Code assumes default IEEE 754 rounding (round-to-nearest)
+- No calls to `fesetround()` or similar FP environment controls
+
+**Potential Non-Determinism Sources:**
+1. Uninitialized memory (if constructors fail silently)
+2. Compiler optimization differences (e.g., `-ffast-math` changes FP semantics)
+3. Platform-dependent floating point modes if not explicitly set by environment
+
+**Recommendation:** For deterministic gradient-based system ID, ensure:
+- Same compiler flags across runs
+- No `-ffast-math` or similar aggressive FP optimizations
+- Explicit FP rounding mode setting if reproducibility is critical
 
 ---
 
-END OF AUDIT
+## 5. SENSITIVITY TO EXTREME INPUTS
+
+### 5.1 Extreme Timestep (`dt`)
+
+**Large `dt`:** ABM4 has stability region, but not explicitly documented. Expect instability for `dt > critical_value` depending on system stiffness.
+
+**Small `dt`:** Roundoff error accumulation over many timesteps. Trust-region solver may struggle with very small residuals.
+
+**Evidence:** No dt range checks in legacy code. User responsible for choosing appropriate timestep.
+
+### 5.2 Extreme Insertion Depth (`L_inserted`)
+
+**Large `L_inserted`:** More flexible segments, larger state dimension, potentially more BVP unknowns.
+
+**Small `L_inserted`:** Fewer segments, simpler problem, but may hit rigid body limit.
+
+**Evidence:** No bounds checking on `L_inserted` in legacy code.
+
+### 5.3 Zero and High Actuation Currents
+
+**Zero current:** May hit singular Jacobian if equilibrium shape becomes straight (loss of curvature DOF).
+
+**High current:** Large magnetic forces/torques. May exceed small-angle approximations (if any). No saturation or clamping detected in legacy code.
+
+**Evidence:** No actuation bounds in legacy physics (only limited by catheter parameters).
+
+---
+
+## 6. KEY FILES SUMMARY
+
+### 6.1 Core Physics
+
+1. `legacy_worktree/src/CRM_IVPSolver.cpp` — Static IVP integration
+2. `legacy_worktree/src/CRM_BVPSolver.cpp` — Static BVP solver
+3. `legacy_worktree/src/CoilDynamics_Defs.cpp` — Dynamics equations (BVP + IVP)
+4. `legacy_worktree/src/CRM_ForwardKinematics.cpp` — Forward kinematics API
+
+### 6.2 Numerical Methods
+
+5. `legacy_worktree/src/CRM_IVP_NumericalIntegrationTemplates.hpp` — ABM4 templates
+6. `legacy_worktree/src/CRMDYN_Numerical_Integration.hpp` — Dynamics integrators
+7. `legacy_worktree/numerical/minpack.hpp` — Trust-region solver (Powell dogleg)
+
+### 6.3 Configuration
+
+8. `legacy_worktree/src/CRM.hpp` — Static solver constants (`TRUSTREGION_TOLERANCE`, residual scales)
+9. `legacy_worktree/src/CRMDYN.hpp` — Dynamics solver constants
+10. `legacy_worktree/src/CRM_BVPIVP_APIDeclarations.hpp` — Shared declarations
+
+---
+
+## 7. CRITICAL FINDINGS SUMMARY
+
+| Finding | Severity | Evidence |
+|---------|----------|----------|
+| NaN detection commented out | **CRITICAL** | `CoilDynamics_Defs.cpp:161` |
+| Singular matrix continues execution | **HIGH** | `CoilDynamics_Defs.cpp:1579` |
+| No explicit rank deficiency handling | **MEDIUM** | No rank checks in BVP solver |
+| Silent failure propagation | **MEDIUM** | `localmin` not checked at intermediate levels |
+| No timeout mechanism | **LOW** | Trust-region `maxfev` internal only |
+| Hard-coded tolerance (1e-5) | **LOW** | `CRM.hpp:32` |
+
+---
+
+## 8. SAFETY RECOMMENDATIONS FOR B0
+
+### 8.1 Before System Identification Begins
+
+1. **Re-enable NaN detection** with proper error propagation (not `exit()`, but status return)
+2. **Add singular matrix recovery** (return failure status instead of continuing)
+3. **Surface convergence diagnostics** to Python layer (iterations, residual norms, rank)
+4. **Add input validation** in Python wrapper (dt range, L_inserted bounds, actuation limits)
+
+### 8.2 During Gradient-Based Optimization
+
+1. **Monitor gradient norms** for explosion/vanishing
+2. **Check BVP convergence** at every forward step
+3. **Validate finite values** in both forward state and backward gradients
+4. **Clip gradients** if necessary (document threshold choice)
+
+---
+
+## AUDIT STATUS
+
+**Scope:** Read-only inspection of legacy C++ physics/solver code
+**Modifications Made:** NONE (audit-only)
+**Legacy Code Modified:** NO
+**Git Worktree Used:** YES (`legacy_worktree` on `main` branch)
+
+**Completion:** ✅ ALL LEGACY DYNAMICS AUDITED
+
+**Next Steps:**
+- Proceed to Binding Layer Audit
+- Then Python Control Layer Audit
+- Then Cross-Layer Risk Analysis
+
+---
+
+**END OF LEGACY C++ DYNAMICS AUDIT**

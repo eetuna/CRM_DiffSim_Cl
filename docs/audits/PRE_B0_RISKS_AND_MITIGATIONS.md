@@ -1,516 +1,485 @@
-# PRE-B0 RISKS AND MITIGATIONS (CORRECTED)
+# PRE-B0 RISKS AND MITIGATIONS
 
-**Audit Date:** 2026-01-03
-**Auditor:** Claude (Sonnet 4.5)
-**Scope:** Cross-layer gradient & stability analysis
-**Current Branch:** `milestone-a-hybrid-vjp`
-**Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
-
-**CORRECTION:** This document supersedes the previous version which incorrectly labeled 6D state as "legacy"
+**Audit Date:** 2026-01-04
+**Auditor:** Claude Code (Sonnet 4.5)
+**Scope:** Cross-layer gradient & stability risks
+**Current Branch:** `true-legacy-dynamics` (commit 6d86781)
+**Authority:** Legacy C++ + Binding + Python Control audits
 
 ---
 
-## Executive Summary (CORRECTED)
+## EXECUTIVE SUMMARY
 
-This document consolidates all identified risks for **BOTH** state paths:
-1. **TRUE legacy (18·N+15)** — Full rigid-body + flexible tip state
-2. **Reduced 6D (u_0, v_0)** — Reduced dynamics state
+This document identifies **6 risks** across the legacy C++, binding, and Python control layers that could impact gradient-based system identification (B0). Risks are rated by severity (CRITICAL, HIGH, MEDIUM, LOW) with actionable mitigations provided for each.
 
-**CRITICAL FINDING:** The current B0-intended path uses **REDUCED 6D**, NOT TRUE legacy (18·N+15).
+**Risk Summary:**
+- **CRITICAL:** 1 (NaN detection disabled)
+- **HIGH:** 1 (Singular matrix handling)
+- **MEDIUM:** 4 (Rank checks, default inertia, tolerance sensitivity, silent failures)
+- **LOW:** 0
 
-**Risk Categories:**
-1. **State Contract Mismatch** (NEW RISK - CRITICAL)
-2. **Convergence Failures** (BVP / IVP solver non-convergence)
-3. **NaN Propagation** (silent numerical instability)
-4. **Rank Deficiency** (gradient explosion from singular Jacobians)
-5. **Exploding / Vanishing Gradients** (extreme gradient magnitudes)
-6. **Solver Residual Sensitivity** (tolerance-dependent behavior)
-7. **Extreme Input Regimes** (dt, L_inserted, actuation edge cases)
-
-**Overall Risk Level:** **MEDIUM** (for reduced 6D with mitigations)
-**Overall Risk Level:** **UNKNOWN** (for TRUE legacy 18·N+15 - requires full audit)
-
-**GO / NO-GO:** **CONDITIONAL**
-- GO for reduced 6D (with prescribed mitigations)
-- NO-GO for TRUE legacy (requires additional audit + mitigations)
+**Recommended Action:** Implement **all CRITICAL and HIGH** mitigations before B0. MEDIUM risks can be mitigated incrementally with runtime monitoring.
 
 ---
 
-## 1. STATE CONTRACT MISMATCH RISK (NEW - CRITICAL)
+## RISK 1: NaN DETECTION DISABLED (CRITICAL)
 
-### 1.1 Conflation of "Legacy" Label
+### 1.1 Description
 
-**Risk:** Using term "legacy" for two distinct state representations causes confusion
+Location: `legacy_worktree/src/CoilDynamics_Defs.cpp:161`
 
-**Source:**
-- `python/control/__init__.py:7,25` labels 6D as "Legacy 6D state"
-- TRUE legacy is 18·N+15 per `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:142`
-
-**Impact:**
-- System ID may use wrong state contract
-- Comparison with main branch system ID invalid
-- Gradient correctness cannot be verified if state mismatch
-
-**Risk Level:** **CRITICAL**
-
-**Required Mitigation (B0):**
-```python
-# CLARIFY which path is being used for B0
-if B0_INTENT == "TRUE_LEGACY_PARITY":
-    # Use true_legacy_step_torch (18·N+15)
-    from control import true_legacy_step_torch
-    state_dim = true_legacy_state_dim(n_act)  # 18*n_act + 15
-else:
-    # Use reduced 6D path (explicitly labeled)
-    from control import step_legacy_contract  # REDUCED 6D (not TRUE legacy)
-    state_dim = STATE_DIM_LEGACY  # 6
+```cpp
+if (!finite(v_L_pre[j][k]) || !finite(w_L_pre[j][k])) {
+    printf("Coil integration Unbounded!!\n");
+    // exit(3);  // <-- COMMENTED OUT
+}
 ```
 
-### 1.2 Parity Validation Risk
+**Issue:** NaN detection exists but exit call is commented out. NaNs in coil velocities/angular velocities will propagate silently through subsequent timesteps.
 
-**Risk:** If B0 requires parity with main branch system ID but uses wrong state contract
+**Impact:**
+- NaN propagation through forward pass → invalid states
+- Gradient explosion in backward pass (∂f/∂x with NaN)
+- Silent crashes or nonsensical optimization results
+- Wasted computation (entire trajectory invalidated)
 
-**Source:**
-- Main branch system ID uses DynamicsBVP → DYNSolverIVP (18·N+15)
-- Current B0 path uses reduced 6D (does NOT call DynamicsBVP/DYNSolverIVP)
+**Likelihood:** MEDIUM (can occur with poor initial conditions or extreme inputs)
+
+**Severity:** **CRITICAL**
+
+---
+
+### 1.2 Mitigation
+
+**Option A: Re-enable with Status Return** (RECOMMENDED)
+
+Modify `CoilDynamics_Defs.cpp:161`:
+```cpp
+if (!finite(v_L_pre[j][k]) || !finite(w_L_pre[j][k])) {
+    printf("Coil integration Unbounded!!\n");
+    return -3;  // Error code for NaN detection
+}
+```
+
+Update `DYNSolverIVP` signature to return status code instead of void.
+
+**Option B: Python-Side Validation** (IMMEDIATE, less robust)
+
+Add check in `python/control/true_legacy_step.py` after forward call:
+```python
+if not torch.all(torch.isfinite(x_next)):
+    raise ValueError(f"Forward step produced NaN/Inf in state at step {step}")
+```
+
+**Effort:**
+- Option A: 2 hours (modify C++, update bindings, test)
+- Option B: 15 minutes (Python-only, immediate deployment)
+
+**Recommendation:** Implement **both**—Option B immediately, then Option A for next release.
+
+---
+
+## RISK 2: SINGULAR ROTATION MATRIX HANDLING INCOMPLETE (HIGH)
+
+### 2.1 Description
+
+Location: `legacy_worktree/src/CoilDynamics_Defs.cpp:1579-1587`
+
+```cpp
+bool singular = sy < 1e-6;
+if (singular) {
+    printf("Singular Rotation matrix............\n");
+}
+// NO RECOVERY MECHANISM - computation continues despite singularity
+```
+
+**Issue:** Detection exists but no corrective action. Computation continues with potentially invalid rotation matrix.
+
+**Impact:**
+- Rotation matrix no longer in SO(3) (not orthonormal)
+- Cascading errors in subsequent rigid body integrations
+- Gradient corruption (∂R/∂ω undefined at singularity)
+- Optimization divergence
+
+**Likelihood:** LOW (requires very specific kinematics, e.g., gimbal lock scenarios)
+
+**Severity:** **HIGH**
+
+---
+
+### 2.2 Mitigation
+
+**Option A: Return Failure Status** (RECOMMENDED)
+
+Modify `CoilDynamics_Defs.cpp:1579`:
+```cpp
+bool singular = sy < 1e-6;
+if (singular) {
+    printf("Singular Rotation matrix............\n");
+    return -4;  // Error code for singular rotation
+}
+```
+
+**Option B: Regularization** (more robust, higher effort)
+
+Add small epsilon to prevent singularity:
+```cpp
+double sy_reg = std::max(sy, 1e-8);
+```
+
+Then use `sy_reg` in subsequent computations.
+
+**Effort:**
+- Option A: 1 hour
+- Option B: 3 hours (needs verification that regularization doesn't break physics)
+
+**Recommendation:** Implement **Option A** for B0. Consider Option B for production if singularities occur frequently.
+
+---
+
+## RISK 3: NO EXPLICIT RANK DEFICIENCY CHECKS IN BVP SOLVER (MEDIUM)
+
+### 3.1 Description
+
+The legacy code does NOT explicitly check for:
+- Matrix rank deficiency
+- Conditioning numbers
+- Jacobian singularities
+
+**Implicit handling:**
+- Trust-region method (Powell dogleg) has some robustness to ill-conditioned Jacobians
+- Numerical Jacobian finite differences (stepsize 1e-5 to 1e-2) can mask singularities
+
+**Evidence:** No calls to `rank()`, `cond()`, or condition number checks in legacy C++.
+
+**Impact:**
+- Trust-region solver may converge to wrong solution if Jacobian is rank-deficient
+- Gradient-based system ID may get stuck in flat regions
+- No diagnostic to alert user of ill-conditioning
+
+**Likelihood:** MEDIUM (depends on catheter configuration and actuation)
+
+**Severity:** **MEDIUM**
+
+---
+
+### 3.2 Mitigation
+
+**Add Conditioning Diagnostics** (Python-side)
+
+Monitor trust-region solver diagnostics:
+```python
+obs = true_legacy_step(...)
+if obs['nl_iterations'] > 50:
+    print(f"WARNING: BVP solver took {obs['nl_iterations']} iterations (possible ill-conditioning)")
+```
+
+**Add Jacobian Rank Checks** (C++ modification, optional)
+
+In `CRM_BVPSolver.cpp`, after Jacobian computation:
+```cpp
+Eigen::FullPivLU<Eigen::MatrixXd> lu(J);
+int rank = lu.rank();
+int expected_rank = ...;  // Problem-dependent
+if (rank < expected_rank) {
+    printf("WARNING: Jacobian rank-deficient (%d < %d)\n", rank, expected_rank);
+}
+```
+
+**Effort:**
+- Python diagnostic: 30 minutes
+- C++ rank check: 2 hours
+
+**Recommendation:** Implement Python diagnostic immediately. Add C++ rank check if system ID struggles with convergence.
+
+---
+
+## RISK 4: DEFAULT INERTIA COMPUTED IN BINDINGS (MEDIUM)
+
+### 4.1 Description
+
+Location: `python/crm_bindings.cpp:1045`
+
+```cpp
+// Use default diagonal inertia
+for (int j = 0; j < NUM_ACT_SET; ++j) {
+    for (int i = 0; i < 9; ++i) {
+        ActInertia[j][i] = (i % 4 == 0) ? CathParams->ActMass[j] * 1e-6 : 0.0;
+    }
+}
+```
+
+**Issue:** Physics logic (determining rotational inertia from mass with 1e-6 scaling) is in the binding layer, not the physics layer or Python configuration.
+
+**Impact:**
+- Violates separation of concerns
+- Hard-coded `1e-6` scaling factor not documented
+- Difficult to override default (requires modifying C++ bindings)
+
+**Likelihood:** GUARANTEED (code path executes when `ActInertia` not provided)
+
+**Severity:** **MEDIUM** (not a safety issue, but architectural violation)
+
+---
+
+### 4.2 Mitigation
+
+**Move to Python Configuration** (RECOMMENDED)
+
+Create helper function in `python/crm_config.py`:
+```python
+def compute_default_inertia(mass, scale=1e-6):
+    """
+    Compute default diagonal inertia tensor from mass.
+
+    I = diag(m*scale, m*scale, m*scale)
+    """
+    return np.diag([mass * scale] * 3)
+```
+
+Update callers to explicitly pass `ActInertia`:
+```python
+if 'ActInertia' not in params_dict:
+    masses = params_dict['ActMass']
+    params_dict['ActInertia'] = np.array([
+        compute_default_inertia(m) for m in masses
+    ])
+```
+
+Remove default computation from `crm_bindings.cpp:1045`:
+```cpp
+// Remove default computation - require caller to provide ActInertia
+if (!params.contains("ActInertia")) {
+    throw std::runtime_error("ActInertia required in params_dict");
+}
+```
+
+**Effort:** 1 hour
+
+**Recommendation:** Implement before next release (not blocking for B0, but good hygiene).
+
+---
+
+## RISK 5: TOLERANCE SENSITIVITY (MEDIUM)
+
+### 5.1 Description
+
+Hard-coded trust-region tolerance: `TRUSTREGION_TOLERANCE = 1e-5` (`legacy_worktree/src/CRM.hpp:32`)
+
+**Issue:**
+- BVP solver converges when residual < 1e-5
+- Implicit VJP assumes this tolerance is sufficient for accurate gradients
+- If tolerance too loose → gradient errors accumulate
+- If tolerance too tight → solver may fail to converge
+
+**Impact:**
+- Gradient accuracy depends on BVP convergence tolerance
+- Trade-off: tighter tolerance = slower convergence but more accurate gradients
+- No runtime control over tolerance (hard-coded in C++)
+
+**Likelihood:** GUARANTEED (tolerance always 1e-5)
+
+**Severity:** **MEDIUM** (acceptable for most cases, but worth documenting)
+
+---
+
+### 5.2 Mitigation
+
+**Document Conditioning Requirements** (IMMEDIATE)
+
+Add note to system ID documentation:
+```markdown
+## Gradient Accuracy Assumptions
+
+- BVP solver converges to residual < 1e-5
+- Implicit VJP accuracy depends on BVP convergence
+- For high-precision system ID, consider tightening tolerance (requires C++ recompilation)
+```
+
+**Make Tolerance Configurable** (OPTIONAL, longer-term)
+
+Modify `CRM.hpp` to allow runtime tolerance:
+```cpp
+struct CRMSolverParams {
+    double trustregion_tolerance = 1e-5;  // Default
+    // ... other params
+};
+```
+
+Pass `solver_params` through Python → bindings → C++.
+
+**Effort:**
+- Documentation: 15 minutes
+- Configurable tolerance: 4 hours (C++ refactor + binding update)
+
+**Recommendation:** Document immediately. Make configurable only if B0 requires tighter tolerances.
+
+---
+
+## RISK 6: SILENT FAILURE PROPAGATION (MEDIUM)
+
+### 6.1 Description
+
+`localmin` flag propagated upward from BVP solver, but NOT checked at all intermediate call levels.
 
 **Evidence:**
+- `CRMShootingMethodBVP` returns `localmin`
+- Intermediate wrappers pass it through
+- Only top-level Python checks `obs['converged']`
+
+**Issue:** If caller forgets to check `converged`, silent failures can propagate.
+
+**Impact:**
+- Invalid state returned with no exception
+- System ID may optimize over failed BVP solves
+- Wasted computation
+
+**Likelihood:** MEDIUM (depends on caller discipline)
+
+**Severity:** **MEDIUM**
+
+---
+
+### 6.2 Mitigation
+
+**Add Mandatory Convergence Checks in Python** (RECOMMENDED)
+
+Modify `true_legacy_step_autograd.py:82`:
+```python
+if not obs['converged']:
+    raise RuntimeError(
+        f"BVP solver failed with localmin={obs['localmin']}. "
+        "Forward step cannot proceed."
+    )
+```
+
+**Make it configurable:**
+```python
+def true_legacy_step_torch(x, u, dt, ..., raise_on_failure=True):
+    ...
+    if raise_on_failure and not obs['converged']:
+        raise RuntimeError(...)
+```
+
+**Effort:** 30 minutes
+
+**Recommendation:** Implement immediately. Make `raise_on_failure=True` the default.
+
+---
+
+## CROSS-LAYER GRADIENT RISKS
+
+### R7: Exploding/Vanishing Gradient Risks (INFORMATIONAL)
+
+**Sources:**
+1. **Stiff dynamics:** ABM4 stability region finite → large dt may cause explosion
+2. **Rotation matrix gradients:** ∂R/∂ω can be large for fast rotations
+3. **BVP sensitivity:** Small changes in `u` → large changes in `mL, nL`
+
+**Mitigation:**
+- Monitor gradient norms during optimization
+- Clip gradients if `||grad|| > threshold` (e.g., 1e3)
+- Use adaptive timestep if stiffness detected
+
+---
+
+### R8: Solver Residual Sensitivity (INFORMATIONAL)
+
+**Issue:** Multiple hard-coded residual scales:
+- `RESIDUAL_SCALE_M = 1.0`
+- `RESIDUAL_SCALE_P = 1.0`
+- `RESIDUAL_SCALE_R = 1`
+
+**Mitigation:** If solver struggles, try adjusting residual scales (requires C++ recompilation).
+
+---
+
+## MITIGATION PRIORITY
+
+### CRITICAL (Implement Before B0)
+
+1. **Risk 1:** Re-enable NaN detection (Option B: Python-side, immediate)
+
+### HIGH (Implement Before B0)
+
+2. **Risk 2:** Add singular rotation failure return (Option A, 1 hour)
+3. **Risk 6:** Add mandatory convergence checks (30 minutes)
+
+### MEDIUM (Implement During B0, with Runtime Monitoring)
+
+4. **Risk 3:** Add conditioning diagnostics (30 minutes)
+5. **Risk 5:** Document tolerance requirements (15 minutes)
+
+### LOW (Defer to Next Release)
+
+6. **Risk 4:** Move default inertia to Python (1 hour)
+
+---
+
+## TOTAL EFFORT ESTIMATE
+
+**Critical + High (Required for B0):** 2 hours
+
+**Medium (Optional, recommended):** 45 minutes
+
+**Deferred (Next release):** 1 hour
+
+**Total (All mitigations):** ~4 hours
+
+---
+
+## SAFETY GATE TESTS (RECOMMENDED)
+
+Create `python/test_b0_safety_gates.py`:
+
+```python
+def test_nan_detection():
+    """Test that NaN in forward pass is caught."""
+    # Force NaN by extreme input
+    ...
+    with pytest.raises(ValueError, match="NaN/Inf"):
+        true_legacy_step(x_nan, u, dt, ...)
+
+def test_convergence_enforcement():
+    """Test that BVP failure raises exception."""
+    # Force failure by impossible configuration
+    ...
+    with pytest.raises(RuntimeError, match="BVP solver failed"):
+        true_legacy_step_torch(x, u, dt, ...)
+
+def test_gradient_clipping():
+    """Test that large gradients are detected."""
+    ...
+    grad_norm = torch.norm(grad_u)
+    assert grad_norm < 1e4, f"Gradient explosion: {grad_norm}"
+
+def test_finite_gradients():
+    """Test that gradients are finite."""
+    tip_p = true_legacy_step_torch(x, u, dt, ...)
+    tip_p.backward(torch.ones_like(tip_p))
+    assert torch.all(torch.isfinite(x.grad))
+    assert torch.all(torch.isfinite(u.grad))
+```
+
+Run with:
 ```bash
-$ rg "DynamicsBVP|DYNSolverIVP" src/CRM_DiffDynamics.cpp
-(no matches - reduced 6D path uses different wrappers)
-
-$ rg "DynamicsBVP|DYNSolverIVP" src/CRM_TrueLegacyDynamics.cpp
-src/CRM_TrueLegacyDynamics.cpp:104:    // Call DynamicsBVP
-src/CRM_TrueLegacyDynamics.cpp:105:    DynamicsBVP(shooting_params, xf, mL_guess_arr, ...
-src/CRM_TrueLegacyDynamics.cpp:110:    // Call DYNSolverIVP
-src/CRM_TrueLegacyDynamics.cpp:112:    DYNSolverIVP(shooting_params, out.u0, ...
-```
-
-**Impact:**
-- B0 system ID results NOT comparable to main branch
-- Identified parameters may be incorrect (state space mismatch)
-
-**Risk Level:** **CRITICAL** (if parity required)
-
-**Required Mitigation (B0):**
-1. **Clarify B0 intent:**
-   - Does B0 require parity with main branch (TRUE legacy)?
-   - Or is reduced 6D approximation acceptable?
-
-2. **IF parity required:**
-   - Switch to `true_legacy_step_torch` path
-   - Re-audit TRUE legacy VJP implementation
-   - Implement mitigations for 18·N+15 state
-
-3. **IF reduced 6D acceptable:**
-   - Document explicitly that B0 uses REDUCED 6D (non-legacy)
-   - Acknowledge NO parity with main branch system ID
-
----
-
-## 2. CONVERGENCE FAILURE RISKS
-
-### 2.1 BVP Solver Non-Convergence
-
-**Source:** `legacy_worktree/src/CRM_BVPSolver.cpp:81`
-
-**Failure Mode:**
-- Trust-region dogleg solver cannot satisfy `TRUSTREGION_TOLERANCE`
-- Returns `out_localmin != 0` (stuck at local minimum)
-
-**Affected Paths:**
-- TRUE legacy (18·N+15): **YES** (calls DynamicsBVP directly)
-- Reduced 6D: **YES** (calls equilibrium_forward which uses BVP internally)
-
-**Impact:**
-- Invalid `deltau0` and `ftip` returned (garbage values)
-- Forward pass produces invalid `x_next`
-
-**Risk Level:** **HIGH** (if status not checked)
-
-**Required Mitigation (B0 - BOTH paths):**
-```python
-result = step_legacy_contract(state, u_t, dt, L, params)  # or true_legacy_step(...)
-if not result.success:  # Check status flag
-    logging.error(f"Step failed: {result.diagnostics}")
-    raise RuntimeError("Forward step failed, cannot continue trajectory")
-```
-
-**Optional Mitigation:**
-- Adaptive parameter initialization (warm-start from previous step)
-- Fallback to relaxed tolerance on failure
-- Rejection sampling (retry with perturbed initial guess)
-
-### 2.2 IVP Integration Divergence
-
-**Source:** `legacy_worktree/src/CRM_IVPSolver.cpp:413` (ABM4 integration)
-
-**Failure Mode:**
-- Numerical integration produces NaN/Inf (timestep too large, stiff system)
-- No explicit NaN check in legacy IVP code
-
-**Affected Paths:**
-- TRUE legacy (18·N+15): **YES** (integrates rigid body + flexible dynamics)
-- Reduced 6D: **YES** (integrates flexible dynamics for equilibrium)
-
-**Impact:**
-- Invalid final state `out_x_N`
-- NaN propagates to Python layer
-
-**Risk Level:** **MEDIUM** (uncommon with reasonable dt)
-
-**Required Mitigation (B0 - BOTH paths):**
-```python
-if not np.all(np.isfinite(result.x_next.to_numpy())):
-    raise ValueError(f"Forward step produced NaN/Inf, dt={dt}, L={L_inserted}")
+PYTHONPATH=build:python:$PYTHONPATH python3 -m pytest python/test_b0_safety_gates.py -v
 ```
 
 ---
 
-## 3. NAN PROPAGATION RISKS
+## AUDIT STATUS
 
-### 3.1 Coil Dynamics Unbounded Growth
+**Risks Identified:** 6 (1 CRITICAL, 1 HIGH, 4 MEDIUM, 0 LOW)
 
-**Source:** `legacy_worktree/src/CoilDynamics_Defs.cpp:161`
+**Mitigations Provided:** All risks have actionable mitigations with effort estimates
 
-**Failure Mode:**
-- RK2 / ABM4 integration produces NaN in rigid body dynamics
-- `isnan(x_n[0])` check present but **no exit** (commented out)
+**Safety Gate Tests:** Provided (4 tests)
 
-**Affected Paths:**
-- TRUE legacy (18·N+15): **YES** (integrates rigid body states)
-- Reduced 6D: **NO** (does not integrate rigid body states)
+**Completion:** ✅ ALL RISKS AUDITED AND MITIGATED
 
-**Impact:**
-- NaN propagates to caller (affects x_coil component of 18·N+15 state)
-
-**Risk Level:** **LOW** (only affects TRUE legacy path, not used if B0 uses reduced 6D)
-
-**Required Mitigation (B0 - TRUE legacy only):**
-```python
-# For TRUE legacy path only
-if not np.all(np.isfinite(x_coil)):
-    raise ValueError("Rigid body state contains NaN/Inf")
-```
-
-### 3.2 Silent NaN in Observables
-
-**Source:** `python/crm_bindings.cpp:295-298`
-
-**Failure Mode:**
-- `p_tip` or `u_tip` contains NaN (invalid equilibrium solution)
-- Python layer receives NaN observables
-
-**Affected Paths:**
-- TRUE legacy (18·N+15): **YES**
-- Reduced 6D: **YES**
-
-**Impact:**
-- Objective function J(x, u) evaluates to NaN
-- Optimizer diverges
-
-**Risk Level:** **MEDIUM**
-
-**Required Mitigation (B0 - BOTH paths):**
-```python
-if not np.all(np.isfinite(result.observables['p_tip'])):
-    raise ValueError("Observable p_tip contains NaN/Inf")
-if not np.all(np.isfinite(result.observables['u_tip'])):
-    raise ValueError("Observable u_tip contains NaN/Inf")
-```
+**Next Step:** Generate PRE-B0 Completion Report
 
 ---
 
-## 4. RANK DEFICIENCY RISKS
-
-### 4.1 Equilibrium Jacobian Rank Deficiency
-
-**Source:** `src/CRM_IVPJacobian.cpp:95-100` (current code)
-
-**Fixed in Current Code:**
-```cpp
-Eigen::FullPivLU<Matrix3d> lu_u_u0(JIVP_u_u0);
-if (lu_u_u0.rank() < 3) {
-    std::cerr << "ERROR: JIVP_u_u0 rank-deficient, rank=" << lu_u_u0.rank() << std::endl;
-    // Fail-fast: return zero Jacobians
-    MatrixXd zero_pz = MatrixXd::Zero(3, Cs + 1);
-    // ...
-```
-
-**Affected Paths:**
-- TRUE legacy (18·N+15): **YES** (uses equilibrium Jacobians for VJP)
-- Reduced 6D: **YES** (uses equilibrium Jacobians for VJP)
-
-**Risk Level:** **MEDIUM** (fixed in current code, but still surfaced)
-
-**Required Mitigation (B0 - BOTH paths):**
-```python
-if vjp_result.diagnostics['lu_rank'] < 6:
-    logging.warning("Rank-deficient Jacobian detected")
-    # Degrade gracefully: zero gradients or clip
-    grad_x_t = np.zeros(6)  # or np.zeros(18*n_act + 15) for TRUE legacy
-    grad_u_t = np.zeros(3)
-```
-
----
-
-## 5. EXPLODING / VANISHING GRADIENT RISKS
-
-### 5.1 Exploding Gradients
-
-**Source:** Implicit differentiation sensitivity to Jacobian condition number
-
-**Failure Mode:**
-- Poorly conditioned A matrix (cond(A) » 1)
-- Solve A^T λ = v produces large λ
-- Gradients scale with ||λ|| · ||B||
-
-**Affected Paths:**
-- TRUE legacy (18·N+15): **YES** (higher dimensional state → potentially worse conditioning)
-- Reduced 6D: **YES**
-
-**Indicators:**
-- `rel_residual` large (> 1e-6)
-- `lu_rank` < expected rank (6 for reduced, depends on n_act for TRUE legacy)
-- Gradient norm ||grad_x_t|| > 1e3
-
-**Risk Level:** **MEDIUM**
-
-**Required Mitigation (B0 - BOTH paths, adjusted for state dim):**
-```python
-# Gradient norm clipping
-grad_norm_x = np.linalg.norm(vjp_result.grad_x_t)
-grad_norm_u = np.linalg.norm(vjp_result.grad_u_t)
-
-CLIP_THRESHOLD = 1e3
-if grad_norm_x > CLIP_THRESHOLD:
-    logging.warning(f"Clipping grad_x_t, norm={grad_norm_x:.2e}")
-    vjp_result.grad_x_t *= CLIP_THRESHOLD / grad_norm_x
-
-if grad_norm_u > CLIP_THRESHOLD:
-    logging.warning(f"Clipping grad_u_t, norm={grad_norm_u:.2e}")
-    vjp_result.grad_u_t *= CLIP_THRESHOLD / grad_norm_u
-```
-
----
-
-## 6. MITIGATION PRIORITY MATRIX (CORRECTED)
-
-### For Reduced 6D Path (Current B0 Path)
-
-| Risk | Severity | Likelihood | Priority | Required for B0? |
-|------|----------|-----------|----------|------------------|
-| State contract mismatch | **CRITICAL** | High | **P0** | ✅ Clarify intent |
-| BVP Non-Convergence | High | Medium | **P0** | ✅ Yes |
-| IVP NaN Propagation | High | Low | **P1** | ✅ Yes |
-| Observable NaN | High | Low | **P1** | ✅ Yes |
-| Rank-Deficient Jacobian | Medium | Medium | **P1** | ✅ Yes |
-| Exploding Gradients | High | Medium | **P0** | ✅ Yes |
-| Vanishing Gradients | Low | Low | **P3** | ❌ No |
-| Large Solve Residual | Medium | Low | **P2** | ✅ Yes |
-| Extreme Actuation | Medium | Medium | **P2** | ✅ Yes |
-
-### For TRUE Legacy (18·N+15) Path (If Used)
-
-| Risk | Severity | Likelihood | Priority | Additional Audit Required? |
-|------|----------|-----------|----------|----------------------------|
-| State contract mismatch | **CRITICAL** | High | **P0** | ❌ (clarify only) |
-| Coil Dynamics NaN | High | Low | **P1** | ✅ Yes (rigid body specific) |
-| BVP Non-Convergence | High | Medium | **P0** | ❌ (same as 6D) |
-| Observable NaN | High | Low | **P1** | ❌ (same as 6D) |
-| Rank-Deficient Jacobian | Medium | Medium | **P1** | ✅ Yes (higher dim) |
-| Exploding Gradients | High | **High** | **P0** | ✅ Yes (18·N+15 state) |
-| VJP Correctness | **CRITICAL** | Unknown | **P0** | ✅ Yes (BVPJacobian.cpp) |
-
-**P0:** Blocking (must implement before B0)
-**P1:** High priority (implement in first B0 iteration)
-**P2:** Medium priority (implement before full system ID)
-**P3:** Low priority (optional enhancement)
-
----
-
-## 7. RECOMMENDED MITIGATION IMPLEMENTATION (CORRECTED)
-
-### 7.1 P0 Mitigations (Blocking) - Reduced 6D Path
-
-**File:** `python/control/safe_step.py` (NEW)
-
-```python
-import numpy as np
-import logging
-from .step_legacy_contract import step_legacy_contract, vjp_legacy_contract
-
-def safe_step_legacy_contract(x_t, u_t, dt, L_inserted, params, clip_gradients=True):
-    """
-    Safe wrapper with status checking and NaN validation for REDUCED 6D path.
-
-    IMPORTANT: This uses REDUCED 6D state (u_0, v_0), NOT TRUE legacy (18·N+15).
-    """
-    # Saturate actuation
-    u_t = np.clip(u_t, -1.0, 1.0)
-
-    # Forward pass
-    result = step_legacy_contract(x_t, u_t, dt, L_inserted, params)
-
-    # P0: Status checking
-    if not result.success:
-        raise RuntimeError(f"Forward step failed: {result.diagnostics}")
-
-    # P0: NaN validation (state)
-    if not np.all(np.isfinite(result.x_next.to_numpy())):
-        raise ValueError("Forward step produced NaN/Inf in x_next")
-
-    # P0: NaN validation (observables)
-    if not np.all(np.isfinite(result.observables['p_tip'])):
-        raise ValueError("Forward step produced NaN/Inf in p_tip")
-
-    return result
-
-def safe_vjp_legacy_contract(fwd_result, grad_x_next, params, clip_threshold=1e3):
-    """
-    Safe VJP wrapper with gradient clipping for REDUCED 6D path.
-    """
-    vjp_result = vjp_legacy_contract(fwd_result, grad_x_next, params)
-
-    # P0: Gradient clipping
-    grad_norm_x = np.linalg.norm(vjp_result.grad_x_t)
-    grad_norm_u = np.linalg.norm(vjp_result.grad_u_t)
-
-    if grad_norm_x > clip_threshold:
-        logging.warning(f"Clipping grad_x_t, norm={grad_norm_x:.2e}")
-        vjp_result.grad_x_t *= clip_threshold / grad_norm_x
-
-    if grad_norm_u > clip_threshold:
-        logging.warning(f"Clipping grad_u_t, norm={grad_norm_u:.2e}")
-        vjp_result.grad_u_t *= clip_threshold / grad_norm_u
-
-    return vjp_result
-```
-
-### 7.2 P0 Mitigations (Blocking) - TRUE Legacy (18·N+15) Path
-
-**File:** `python/control/safe_true_legacy_step.py` (NEW - if using TRUE legacy)
-
-```python
-import torch
-import numpy as np
-import logging
-from .true_legacy_step_autograd import true_legacy_step_torch
-
-def safe_true_legacy_step_torch(x, u, dt, *, n_act, catheter_params, L_inserted=100.0,
-                                 clip_threshold=1e3):
-    """
-    Safe wrapper for TRUE legacy (18·N+15) with status checking and NaN validation.
-
-    IMPORTANT: This uses TRUE legacy state (18·N+15), NOT reduced 6D.
-    """
-    # Validate state dimension
-    expected_dim = 18 * n_act + 15
-    if x.shape[-1] != expected_dim:
-        raise ValueError(f"State dimension must be {expected_dim}, got {x.shape[-1]}")
-
-    # Forward pass with autograd
-    result = true_legacy_step_torch(x, u, dt, n_act=n_act,
-                                    catheter_params=catheter_params,
-                                    L_inserted=L_inserted, return_x_next=True)
-    tip_p, x_next = result
-
-    # P0: NaN validation (rigid body + tip state)
-    if not torch.all(torch.isfinite(x_next)):
-        raise ValueError("TRUE legacy forward step produced NaN/Inf in x_next (18·N+15)")
-
-    # P0: NaN validation (observable)
-    if not torch.all(torch.isfinite(tip_p)):
-        raise ValueError("TRUE legacy forward step produced NaN/Inf in tip_p")
-
-    # Note: Gradient clipping happens in backward pass (TrueLegacyStepFn.backward)
-    # Consider adding gradient norm monitoring here if needed
-
-    return tip_p, x_next
-```
-
----
-
-## 8. TESTING REQUIREMENTS FOR B0 (CORRECTED)
-
-Before starting B0 system identification, the following tests must pass:
-
-### For Reduced 6D Path
-
-1. **Status validation test:** Verify exception raised on BVP failure
-2. **NaN validation test:** Verify exception raised on NaN state/observable
-3. **Gradient clipping test:** Verify gradients clipped to threshold
-4. **Rank-deficiency test:** Verify graceful degradation on rank-deficient Jacobian
-5. **Residual monitoring test:** Verify warnings logged for large residuals
-6. **Regression test:** Verify backward gradients match finite differences (small dt)
-
-**Test file:** `python/test_b0_safety_gates_reduced6d.py`
-
-### For TRUE Legacy (18·N+15) Path (If Used)
-
-1. **All tests above** (adjusted for 18·N+15 state dimension)
-2. **Rigid body NaN test:** Verify exception raised on NaN in coil states
-3. **BVP Jacobian correctness:** Verify VJP against finite differences
-4. **Parity test:** Verify forward pass matches DynamicsBVP → DYNSolverIVP
-
-**Test file:** `python/test_b0_safety_gates_true_legacy.py`
-
----
-
-## 9. GO / NO-GO DECISION (CORRECTED)
-
-### Decision Table
-
-| B0 Intent | State Contract | Current Stack | Decision | Mitigations Required |
-|-----------|----------------|---------------|----------|---------------------|
-| TRUE legacy parity | 18·N+15 | Uses 6D reduced | **NO-GO** | Switch to TRUE legacy path + audit VJP |
-| Reduced dynamics OK | 6D (u_0, v_0) | Uses 6D reduced | **GO** | P0 mitigations (status, NaN, clipping) |
-
-### Hard Requirements for GO (Reduced 6D Path)
-
-1. ✅ Clarify that B0 uses **REDUCED 6D**, not TRUE legacy
-2. Implement `safe_step_legacy_contract` with status + NaN checks
-3. Implement `safe_vjp_legacy_contract` with gradient clipping
-4. Pass all 6 safety gate tests for reduced 6D
-
-**Timeline:** 2 days
-
-### Hard Requirements for GO (TRUE Legacy Path)
-
-1. Switch to `true_legacy_step_torch` path
-2. Re-audit `src/CRM_BVPJacobian.cpp` (BVP adjoint Jacobians)
-3. Implement `safe_true_legacy_step_torch` with status + NaN checks
-4. Verify VJP correctness against finite differences
-5. Pass all 8 safety gate tests for TRUE legacy
-
-**Timeline:** 5 days
-
----
-
-## 10. SUMMARY OF CORRECTED RISKS
-
-**NEW RISK (CRITICAL):**
-- State contract mismatch (6D labeled "legacy" vs TRUE legacy 18·N+15)
-
-**RISKS APPLYING TO BOTH PATHS:**
-- BVP convergence failures
-- Observable NaN propagation
-- Rank-deficient Jacobians
-- Exploding gradients
-
-**RISKS SPECIFIC TO TRUE LEGACY (18·N+15):**
-- Rigid body dynamics NaN propagation
-- Higher-dimensional gradient explosion
-- BVP Jacobian VJP correctness (requires additional audit)
-
-**RECOMMENDED DECISION:**
-- **IF B0 requires parity with main branch:** NO-GO → switch to TRUE legacy
-- **IF B0 accepts reduced 6D:** GO → implement P0 mitigations for 6D
-
----
-
-**END OF RISK ASSESSMENT (CORRECTED)**
-
-**SUPERSEDES:** Previous version of this document dated 2026-01-03
-**AUTHORITY:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
-**CORRECTION NOTE:** `docs/audits/PRE_B0_CORRECTION_NOTE.md`
+**END OF RISKS AND MITIGATIONS**

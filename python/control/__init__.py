@@ -22,25 +22,14 @@ from .step_hybrid_legacy_contract import (
     hybrid_dynamics_step, HybridDynamicsStep,
 )
 
-# A1 + A2: Legacy 6D state (contract-exact) with implicit VJP
-from .legacy_state import (
-    LegacyState,
-    STATE_DIM_LEGACY, U0_DIM, V0_DIM,
-)
-from .legacy_state_adapter import (
-    pack_legacy_state, unpack_legacy_state,
-    legacy_state_to_numpy, numpy_to_legacy_state,
-    batch_to_legacy_states,
-)
-from .step_legacy_contract import (
-    LegacyStepResult,
-    LegacyVJPResult,
-    step_legacy_contract,
-    vjp_legacy_contract,
-    load_default_catheter_params,
-    LegacyHybridStep,
-    legacy_dynamics_step,
-)
+# REDUCED 6D (ARCHIVED - NON-LEGACY)
+# The reduced 6D state dynamics (u_0[3], v_0[3]) has been ARCHIVED.
+# It is NOT the TRUE legacy implementation.
+#
+# To access (emits DeprecationWarning):
+#   from python.control.reduced6d import LegacyState, step_legacy_contract
+#
+# For TRUE legacy (18·N+15), use true_legacy_step below.
 
 # A0: TRUE legacy state adapter (18*N+15, no reduction)
 from .true_legacy_state_adapter import (
@@ -51,6 +40,8 @@ from .true_legacy_state_adapter import (
 )
 from .true_legacy_step import (
     true_legacy_step,
+    true_legacy_linearize,
+    true_legacy_tip_jacobian,
 )
 from .true_legacy_step_autograd import (
     true_legacy_step_torch,
@@ -71,26 +62,16 @@ __all__ = [
     'step_hybrid_legacy_contract', 'vjp_hybrid_legacy_contract',
     'hybrid_dynamics_step', 'HybridDynamicsStep',
 
-    # A1 + A2: Legacy 6D state (contract-exact) with implicit VJP
-    'LegacyState',
-    'STATE_DIM_LEGACY', 'U0_DIM', 'V0_DIM',
-    'pack_legacy_state', 'unpack_legacy_state',
-    'legacy_state_to_numpy', 'numpy_to_legacy_state',
-    'batch_to_legacy_states',
-    'LegacyStepResult',
-    'LegacyVJPResult',
-    'step_legacy_contract',
-    'vjp_legacy_contract',
-    'load_default_catheter_params',
-    'LegacyHybridStep',
-    'legacy_dynamics_step',
+    # Reduced 6D (ARCHIVED - import from python.control.reduced6d if needed)
 
-    # A0: TRUE legacy state adapter (18*N+15, no reduction)
+    # TRUE LEGACY (18·N+15) - DEFAULT DYNAMICS
     'COIL_STATE_DIM', 'TIP_STATE_DIM',
     'true_legacy_state_dim', 'true_legacy_warmstart_dim',
     'pack_true_legacy_state', 'unpack_true_legacy_state',
     'pack_true_legacy_warmstart', 'unpack_true_legacy_warmstart',
     'true_legacy_step',
     'true_legacy_step_torch',
+    'true_legacy_linearize',
+    'true_legacy_tip_jacobian',
     'TrueLegacyStepFn',
 ]
