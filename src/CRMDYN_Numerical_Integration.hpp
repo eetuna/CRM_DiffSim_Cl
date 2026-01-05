@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CRM_MatrixOperations_Templates.hpp"
+#include <type_traits>
 
 //
 //
@@ -110,6 +111,85 @@ namespace CRMCatheterModel {
 
     }
 
+    template<typename T>
+    void Rodrigues_SE3_T(const T axis[3], const T theta, T out_Rdelta[9]) {
+        T axis_hat[9];
+        wHat_T(axis, axis_hat);
+
+        T axis_hat2[9];
+        mMult_AB_T<T, 3, 3, 3>(axis_hat, axis_hat, axis_hat2);
+
+        T term1[9], term2[9];
+        T sin_theta = sin(theta);
+        T cos_theta = cos(theta);
+
+        mMult_sA_T<T, 3, 3>(sin_theta, axis_hat, term1);
+        mMult_sA_T<T, 3, 3>(T(1.0) - cos_theta, axis_hat2, term2);
+
+        T I[9] = {T(1.0), T(0.0), T(0.0),
+                  T(0.0), T(1.0), T(0.0),
+                  T(0.0), T(0.0), T(1.0)};
+
+        mAdd_ABC_T<T, 3, 3>(I, term1, term2, out_Rdelta);
+    }
+
+    template<typename T>
+    void SE3_Analytical_Step_T(const T in_R_n[9], const T in_p_n[3], const T in_u_n[3],
+                               double h, T out_R_np1[9], T out_p_np1[3]) {
+        T R_n[9], p_n[3], u_n[3];
+        mCopy_AB_T<T, 9>(in_R_n, R_n);
+        mCopy_AB_T<T, 3>(in_p_n, p_n);
+        mCopy_AB_T<T, 3>(in_u_n, u_n);
+
+        T umagsq = vNormSq_T<T, 3>(u_n);
+        bool is_zero = false;
+        if constexpr (std::is_same_v<T, double>) {
+            is_zero = (umagsq == T(0.0));
+        } else {
+            is_zero = (umagsq.val == 0.0);
+        }
+
+        if (is_zero) {
+            mCopy_AB_T<T, 9>(R_n, out_R_np1);
+            for (int i = 0; i < 3; ++i) {
+                out_p_np1[i] = p_n[i] + R_n[i * 3 + 2] * T(h);
+            }
+            return;
+        }
+
+        T umagsqresp = T(1.0) / umagsq;
+        T umag = sqrt(umagsq);
+        T umagresp = T(1.0) / umag;
+        T unorm[3];
+        for (int i = 0; i < 3; ++i) {
+            unorm[i] = umagresp * u_n[i];
+        }
+        T delsumag = T(h) * umag;
+
+        T Rdelta[9];
+        Rodrigues_SE3_T(unorm, delsumag, Rdelta);
+
+        T uu3dels[3];
+        mMult_sA_T<T, 3, 1>(u_n[2] * T(h), u_n, uu3dels);
+
+        T ImRuxv[3];
+        ImRuxv[0] = Rdelta[0 * 3 + 1] * u_n[0] - Rdelta[0 * 3 + 0] * u_n[1] + u_n[1];
+        ImRuxv[1] = Rdelta[1 * 3 + 1] * u_n[0] - Rdelta[1 * 3 + 0] * u_n[1] - u_n[0];
+        ImRuxv[2] = Rdelta[2 * 3 + 1] * u_n[0] - Rdelta[2 * 3 + 0] * u_n[1];
+
+        T ImRuxvpuuTvds[3];
+        mAdd_AB_T<T, 3, 1>(ImRuxv, uu3dels, ImRuxvpuuTvds);
+
+        T pdelta[3];
+        mMult_sA_T<T, 3, 1>(umagsqresp, ImRuxvpuuTvds, pdelta);
+
+        T Rnpd[3];
+        mMult_AB_T<T, 3, 3, 1>(R_n, pdelta, Rnpd);
+
+        mMult_AB_T<T, 3, 3, 3>(R_n, Rdelta, out_R_np1);
+        mAdd_AB_T<T, 3, 1>(p_n, Rnpd, out_p_np1);
+    }
+
     // Templated version for forward-mode AD with Dual numbers
     template<typename T>
     void CRMIntegrand_dyn_T(double s, const StateVector_T<T>& in_x, const CRMIntegrandParams in_Params, const T in_nL[3],
@@ -133,7 +213,7 @@ namespace CRMCatheterModel {
 
         // for simplicity, create aliases
         auto& u = in_x._u;
-        auto& R = in_x._R;  // R stays double (not differentiated)
+        auto& R = in_x._R;
         auto& udot = out_xdot._u;
 
         // calculate interpolated value of fcum
@@ -170,14 +250,18 @@ namespace CRMCatheterModel {
         // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l); % udot
         //
         //   e3hat*R' = [ -r12 -r22 -r32; r11 r21 r31; 0 0 0];
-        double e3hatRT[9];
+        T e3hatRT[9];
         e3hatRT[0] = -R[1];   e3hatRT[1] = -R[4];   e3hatRT[2] = -R[7];
         e3hatRT[3] = R[0];    e3hatRT[4] = R[3];    e3hatRT[5] = R[6];
-        e3hatRT[6] = 0.0;     e3hatRT[7] = 0.0;     e3hatRT[8] = 0.0;
+        e3hatRT[6] = T(0.0);  e3hatRT[7] = T(0.0);  e3hatRT[8] = T(0.0);
         T e3hatRTfcum[3];
         mMult_AB_T<T, 3, 3, 1>(e3hatRT, fcum, e3hatRTfcum);  // e3m*R'*intf
+        T l_T[3];
+        for (int i = 0; i < 3; ++i) {
+            l_T[i] = T(l[i]);
+        }
         T RTl[3];
-        mMult_ATB_T<T, 3, 3, 1>(R, l, RTl);  // R'*l
+        mMult_ATB_T<T, 3, 3, 1>(R, l_T, RTl);  // R'*l
         T umustar[3];
         mSub_AB_T<T, 3, 1>(u, ustar, umustar);  // (u-ustar_s)
         T Kumustar[3], uhatKumustar[3];
@@ -311,6 +395,7 @@ namespace CRMCatheterModel {
         _DVT xdot_nm1(in_xdot_nm1);  	// from input
         _DVT xdot_nm2(in_xdot_nm2);  	// from input
         _DVT xdot_nm3(in_xdot_nm3);  	// from input
+        using Scalar = std::decay_t<decltype(x_n._u[0])>;
 
 
         //ABM4_STEP_STEP1:
@@ -318,18 +403,28 @@ namespace CRMCatheterModel {
         x_np1_hat = x_n + h * (P_COEFF_N * xdot_n + P_COEFF_Nm1 * xdot_nm1 + P_COEFF_Nm2 * xdot_nm2 + P_COEFF_Nm3 * xdot_nm3);
 #ifdef ANALYTICAL_SE3_STEP
         //      calculate R_np1_hat and p_np1_hat analytically, without numerical integration
-		double u_n_pred[3];
-		for (int i = 0; i < 3; i++) u_n_pred[i] = (P_COEFF_N * x_n._u[i] + P_COEFF_Nm1 * x_nm1._u[i] + P_COEFF_Nm2 * x_nm2._u[i] + P_COEFF_Nm3 * x_nm3._u[i]);
-		SE3_Analytical_Step(x_n._R, x_n._p, u_n_pred, h, x_np1_hat._R /*R_np1_hat*/, x_np1_hat._p /*p_np1_hat*/);
+		Scalar u_n_pred[3];
+		for (int i = 0; i < 3; i++) {
+            u_n_pred[i] = Scalar(P_COEFF_N) * x_n._u[i]
+                        + Scalar(P_COEFF_Nm1) * x_nm1._u[i]
+                        + Scalar(P_COEFF_Nm2) * x_nm2._u[i]
+                        + Scalar(P_COEFF_Nm3) * x_nm3._u[i];
+        }
+		SE3_Analytical_Step_T(x_n._R, x_n._p, u_n_pred, h, x_np1_hat._R /*R_np1_hat*/, x_np1_hat._p /*p_np1_hat*/);
 #endif
         //ABM4_STEP_STEP2:
         CRMIntegrand_dyn(t_n + h, x_np1_hat, in_Params, in_nL, xdot_np1_hat);
         out_x_np1 = x_n + h * (C_COEFF_Np1 * xdot_np1_hat + C_COEFF_N * xdot_n + C_COEFF_Nm1 * xdot_nm1 + C_COEFF_Nm2 * xdot_nm2);
 #ifdef ANALYTICAL_SE3_STEP
         //      calculate R_np1 and p_np1 analytically, without numerical integration
-		double u_n_corr[3];
-		for (int i = 0; i < 3; i++) u_n_corr[i] = (C_COEFF_Np1 * x_np1_hat._u[i] + C_COEFF_N * x_n._u[i] + C_COEFF_Nm1 * x_nm1._u[i] + C_COEFF_Nm2 * x_nm2._u[i]);
-		SE3_Analytical_Step(x_n._R, x_n._p, u_n_corr, h, out_x_np1._R /*R_np1*/, out_x_np1._p /*p_np1*/);
+		Scalar u_n_corr[3];
+		for (int i = 0; i < 3; i++) {
+            u_n_corr[i] = Scalar(C_COEFF_Np1) * x_np1_hat._u[i]
+                        + Scalar(C_COEFF_N) * x_n._u[i]
+                        + Scalar(C_COEFF_Nm1) * x_nm1._u[i]
+                        + Scalar(C_COEFF_Nm2) * x_nm2._u[i];
+        }
+		SE3_Analytical_Step_T(x_n._R, x_n._p, u_n_corr, h, out_x_np1._R /*R_np1*/, out_x_np1._p /*p_np1*/);
 #endif
 
     }
@@ -349,6 +444,7 @@ namespace CRMCatheterModel {
         _DVT k2oh;				// intermediate
         _SVT x_n_p_k1o2;		// intermediate
         auto& xdot_n = out_xdot_n;// for output
+        using Scalar = std::decay_t<decltype(x_n._u[0])>;
 
         //RK2_STEP_STEP1:
         CRMIntegrand_dyn(t_n, x_n, in_Params, in_nL, xdot_n);
@@ -356,7 +452,7 @@ namespace CRMCatheterModel {
         x_n_p_k1o2 = x_n + k1 * 0.5;
 #ifdef ANALYTICAL_SE3_STEP
         // we will calculate R_n_p_k1o2 and p_n_p_k1o2 analytically, without numerical integration
-		SE3_Analytical_Step(x_n._R, x_n._p, x_n._u, h * 0.5, x_n_p_k1o2._R, x_n_p_k1o2._p);
+		SE3_Analytical_Step_T(x_n._R, x_n._p, x_n._u, h * 0.5, x_n_p_k1o2._R, x_n_p_k1o2._p);
 #endif
 
         //RK2_STEP_STEP2:
@@ -364,7 +460,7 @@ namespace CRMCatheterModel {
         out_x_np1 = x_n + h * k2oh;
 #ifdef ANALYTICAL_SE3_STEP
         // we will calculate R_np1 and p_np1 analytically, without numerical integration
-		SE3_Analytical_Step(x_n._R, x_n._p, x_n_p_k1o2._u/*u_np1half*/, h, out_x_np1._R, out_x_np1._p);
+		SE3_Analytical_Step_T(x_n._R, x_n._p, x_n_p_k1o2._u/*u_np1half*/, h, out_x_np1._R, out_x_np1._p);
 #endif
 
     }

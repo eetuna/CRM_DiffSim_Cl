@@ -8,6 +8,8 @@
 #include "CRM_BVPIVP_APIDeclarations.hpp"
 #include "CRM.hpp"
 #include "CRMDYN_Numerical_Integration.hpp"
+#include "CRM_BVPJacobian.hpp"
+#include "CoilDynamics_Defs_Templates2.hpp"
 
  /**
 
@@ -1254,6 +1256,145 @@ void DYNSolverIVP(	CRMShootingMethodParams& in_Params, const double in_u0[3],
         }
     }
 
+}
+
+void DYNSolverIVP_JacobiansFullstate(
+        CRMShootingMethodParams& in_Params,
+        const double in_u0[3],
+        const double in_mL[NUM_ACT_SET][3],
+        const double in_nL[NUM_ACT_SET][3],
+        const double in_tau[NUM_ACT_SET][3],
+        const double in_ftip[3],
+        const double in_x_coil[NUM_ACT_SET][NUM_COIL_STATES],
+        const double in_xf[NUM_STATES],
+        Eigen::MatrixXd& J_xf_y,
+        Eigen::MatrixXd& J_xf_x,
+        Eigen::MatrixXd& J_xcoil_y,
+        Eigen::MatrixXd& J_xcoil_x) {
+
+    const int dim_y = NUM_ACT_SET * 6;
+    const int dim_x = NUM_ACT_SET * NUM_COIL_STATES + NUM_STATES;
+    const int dim_xcoil = NUM_ACT_SET * NUM_COIL_STATES;
+
+    J_xf_y.resize(NUM_STATES, dim_y);
+    J_xf_x.resize(NUM_STATES, dim_x);
+    J_xcoil_y.resize(dim_xcoil, dim_y);
+    J_xcoil_x.resize(dim_xcoil, dim_x);
+    J_xf_y.setZero();
+    J_xf_x.setZero();
+    J_xcoil_y.setZero();
+    J_xcoil_x.setZero();
+
+    Dual u0_dual[3];
+    for (int i = 0; i < 3; ++i) {
+        u0_dual[i] = Dual(in_u0[i], 0.0);
+    }
+
+    Dual tau_dual[NUM_ACT_SET][3];
+    Dual ftip_dual[3];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 3; ++i) {
+            tau_dual[j][i] = Dual(in_tau[j][i], 0.0);
+        }
+    }
+    for (int i = 0; i < 3; ++i) {
+        ftip_dual[i] = Dual(in_ftip[i], 0.0);
+    }
+
+    Dual x_coil_base[NUM_ACT_SET][NUM_COIL_STATES];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < NUM_COIL_STATES; ++i) {
+            x_coil_base[j][i] = Dual(in_x_coil[j][i], 0.0);
+        }
+    }
+
+    Dual xf_base[NUM_STATES];
+    for (int i = 0; i < NUM_STATES; ++i) {
+        xf_base[i] = Dual(in_xf[i], 0.0);
+    }
+
+    for (int col = 0; col < dim_y; ++col) {
+        Dual mL_dual[NUM_ACT_SET][3];
+        Dual nL_dual[NUM_ACT_SET][3];
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < 3; ++i) {
+                mL_dual[j][i] = Dual(in_mL[j][i], 0.0);
+                nL_dual[j][i] = Dual(in_nL[j][i], 0.0);
+            }
+        }
+
+        int act = col / 6;
+        int offset = col % 6;
+        if (offset < 3) {
+            mL_dual[act][offset] = Dual(in_mL[act][offset], 1.0);
+        } else {
+            nL_dual[act][offset - 3] = Dual(in_nL[act][offset - 3], 1.0);
+        }
+
+        Dual out_xf_next[NUM_STATES];
+        Dual out_x_coil_next[NUM_ACT_SET][NUM_COIL_STATES];
+
+        DYNSolverIVP_T<Dual>(in_Params, u0_dual, mL_dual, nL_dual, tau_dual, ftip_dual,
+                             x_coil_base, out_xf_next, out_x_coil_next);
+
+        for (int i = 0; i < NUM_STATES; ++i) {
+            J_xf_y(i, col) = out_xf_next[i].deriv;
+        }
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < NUM_COIL_STATES; ++i) {
+                int row = j * NUM_COIL_STATES + i;
+                J_xcoil_y(row, col) = out_x_coil_next[j][i].deriv;
+            }
+        }
+    }
+
+    for (int col = 0; col < dim_x; ++col) {
+        Dual mL_dual[NUM_ACT_SET][3];
+        Dual nL_dual[NUM_ACT_SET][3];
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < 3; ++i) {
+                mL_dual[j][i] = Dual(in_mL[j][i], 0.0);
+                nL_dual[j][i] = Dual(in_nL[j][i], 0.0);
+            }
+        }
+
+        Dual x_coil_dual[NUM_ACT_SET][NUM_COIL_STATES];
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < NUM_COIL_STATES; ++i) {
+                x_coil_dual[j][i] = Dual(in_x_coil[j][i], 0.0);
+            }
+        }
+
+        Dual xf_dual[NUM_STATES];
+        for (int i = 0; i < NUM_STATES; ++i) {
+            xf_dual[i] = Dual(in_xf[i], 0.0);
+        }
+
+        if (col < dim_xcoil) {
+            int act = col / NUM_COIL_STATES;
+            int offset = col % NUM_COIL_STATES;
+            x_coil_dual[act][offset] = Dual(in_x_coil[act][offset], 1.0);
+        } else {
+            int xf_idx = col - dim_xcoil;
+            xf_dual[xf_idx] = Dual(in_xf[xf_idx], 1.0);
+        }
+
+        Dual out_xf_next[NUM_STATES];
+        Dual out_x_coil_next[NUM_ACT_SET][NUM_COIL_STATES];
+
+        DYNSolverIVP_T<Dual>(in_Params, u0_dual, mL_dual, nL_dual, tau_dual, ftip_dual,
+                             x_coil_dual, out_xf_next, out_x_coil_next);
+
+        for (int i = 0; i < NUM_STATES; ++i) {
+            J_xf_x(i, col) = out_xf_next[i].deriv;
+        }
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < NUM_COIL_STATES; ++i) {
+                int row = j * NUM_COIL_STATES + i;
+                J_xcoil_x(row, col) = out_x_coil_next[j][i].deriv;
+            }
+        }
+    }
 }
 
 void CRMDYNSolverIVP_Prep (

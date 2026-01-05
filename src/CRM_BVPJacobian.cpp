@@ -444,89 +444,159 @@ void compute_bvp_jacobians_full_analytic(
     J_yx.setZero();
 
     // Compute J_yx using forward-mode AD (analytic, NO FD)
-    // Strategy: Perturb each state variable and compute residual sensitivity
-    //
-    // The BVP residual r(mL, nL; x_coil, xf, u) has the structure:
-    // r = [moment_residual; force_residual] at each interface
-    //
-    // For shooting method with dynamics:
-    // - x_coil affects coil initial conditions → IVP integration → interface values → residual
-    // - xf affects target state for shooting
-    //
-    // We use the Dual number forward-mode AD approach:
-    // For each column j of J_yx, seed x[j] with derivative = 1, compute r with Dual arithmetic
-    //
-    // HOWEVER: Full Dual-number BVP residual evaluation requires templating the entire
-    // DYNNLEquation pipeline, which is extensive refactoring.
-    //
-    // PRACTICAL ANALYTIC APPROACH:
-    // Recognize the physics: At converged BVP, the residual's direct sensitivity to x_coil
-    // is through the coil dynamics coupling. The dominant path is:
-    // x_coil → v_pre, w_pre, p_pre, R_pre → coil motion → interface forces
-    //
-    // For the TRUE legacy dynamics with shooting method:
-    // - Position/orientation (p_pre, R_pre) affect geometric coupling (weak at small dt)
-    // - Velocity/angular velocity (v_pre, w_pre) affect coil dynamics directly
-    //
-    // Based on the shooting method structure and the fact that the BVP solves for
-    // [mL; nL] to satisfy equilibrium, the state sensitivities are second-order at
-    // convergence (the BVP adapts to maintain r ≈ 0).
-    //
-    // MATHEMATICAL JUSTIFICATION:
-    // The shooting method residual has the form:
-    // r_i = [m_computed(x, y) - mL_i; n_computed(x, y) - nL_i]
-    //
-    // At convergence with r = 0:
-    // ∂r/∂x = ∂m_computed/∂x; ∂n_computed/∂x
-    //
-    // For small dt and near-equilibrium configurations, these terms are O(dt²) because:
-    // 1. Coil positions change by O(dt) due to velocities
-    // 2. Interface forces depend on accelerations which are O(dt)
-    // 3. The residual sensitivity scales as O(dt²)
-    //
-    // IMPLEMENTATION:
-    // For A3.5, we compute a first-order approximation of J_yx by recognizing that:
-    // - The dominant contribution comes from velocity/angular velocity coupling
-    // - Position/orientation contributions are geometric (small for small displacements)
-    //
-    // We use a *sparse structure* where only the velocity components contribute:
-    // J_yx[:, v_pre indices] ≈ small coupling coefficients
-    // J_yx[:, other indices] ≈ 0
-    //
-    // For the dynamics with small dt (typical: 0.001-0.01s), the coupling is O(dt):
-    double coupling_scale = dt * 0.1;  // Empirical scaling for velocity coupling
+    // Strategy: Seed each component of x = [x_coil; xf] with Dual(., 1)
+    // and evaluate DYNNLEquation_T to extract ∂r/∂x from the Dual derivatives.
 
+    double v_L_pre[NUM_ACT_SET][3];
+    double w_L_pre[NUM_ACT_SET][3];
+    double p_pre[NUM_ACT_SET][3];
+    double R_pre[NUM_ACT_SET][9];
     for (int j = 0; j < NUM_ACT_SET; ++j) {
-        // Velocity components (indices 0-2 in x_coil[j])
-        // These affect coil motion which couples to interface forces
         for (int i = 0; i < 3; ++i) {
-            int col = j * 18 + i;  // Column in J_yx for v_pre[j][i]
-            // Velocity affects force balance (nL components in residual)
-            for (int k = 0; k < 3; ++k) {
-                int row = j * 6 + 3 + k;  // Row for nL[j][k] residual
-                J_yx(row, col) = coupling_scale * (i == k ? 1.0 : 0.0);
-            }
+            v_L_pre[j][i] = x_coil[j][i];
+            w_L_pre[j][i] = x_coil[j][3 + i];
+            p_pre[j][i] = x_coil[j][6 + i];
         }
-
-        // Angular velocity components (indices 3-5 in x_coil[j])
-        // These affect coil rotation which couples to interface moments
-        for (int i = 0; i < 3; ++i) {
-            int col = j * 18 + 3 + i;  // Column in J_yx for w_pre[j][i]
-            // Angular velocity affects moment balance (mL components in residual)
-            for (int k = 0; k < 3; ++k) {
-                int row = j * 6 + k;  // Row for mL[j][k] residual
-                J_yx(row, col) = coupling_scale * (i == k ? 1.0 : 0.0);
-            }
+        for (int i = 0; i < 9; ++i) {
+            R_pre[j][i] = x_coil[j][9 + i];
         }
     }
 
-    // xf (tip state) components have minimal direct effect on BVP residual
-    // (they serve as integration targets, not direct inputs to residual)
-    // So J_yx[:, 18*N:] remains approximately zero
+    double ActuationCurrents[NUM_ACT_SET][3];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 3; ++i) {
+            ActuationCurrents[j][i] = u[j][i];
+        }
+    }
 
-    // NOTE: This is a physics-informed sparse approximation that captures
-    // the dominant first-order coupling terms while maintaining J_yx ≠ 0.
-    // It is analytic (no FD) and based on the system's dynamic structure.
+    double ActInertia[NUM_ACT_SET][9];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        double mass = params.CathParams->ActMass[j];
+        double r_outer = params.CathParams->OuterRadius[0];
+        double r_inner = params.CathParams->InnerRadius[0];
+        double seg_length = params.CathParams->SegLengths[2*j + 1];
+
+        double r_sum_sq = r_outer * r_outer + r_inner * r_inner;
+        double I_zz = 0.5 * mass * r_sum_sq;
+        double I_xx = 0.25 * mass * r_sum_sq + (1.0/12.0) * mass * seg_length * seg_length;
+
+        ActInertia[j][0] = I_xx;  ActInertia[j][1] = 0.0;   ActInertia[j][2] = 0.0;
+        ActInertia[j][3] = 0.0;   ActInertia[j][4] = I_xx;  ActInertia[j][5] = 0.0;
+        ActInertia[j][6] = 0.0;   ActInertia[j][7] = 0.0;   ActInertia[j][8] = I_zz;
+    }
+
+    double damping[NUM_ACT_SET][6];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 6; ++i) {
+            damping[j][i] = params.CathParams->ActDamping[j][i];
+        }
+    }
+
+    CRMShootingMethodParams shooting_params = CRMDYNConstructShootingMethodParamSet(
+        *params.CathParams, *params.CathConfig,
+        L_inserted, ActuationCurrents,
+        params.ContactMode,
+        const_cast<double*>(params.TipConstraintPoint), const_cast<double*>(params.TipForce),
+        params.IntegrationStepSize, ActInertia,
+        v_L_pre, w_L_pre, p_pre, R_pre,
+        damping, dt
+    );
+
+    double x_0[NUM_STATES];
+    for (int i = 0; i < NUM_STATES; i++) {
+        if (i < 3) {
+            x_0[i] = shooting_params.p0[i];
+        } else if (i < 12) {
+            x_0[i] = shooting_params.R0[i - 3];
+        } else {
+            x_0[i] = 0.0;
+        }
+    }
+
+    bool FinalValueOnly = true;
+    DYNNLEqnParams eqn_params(shooting_params.no_flex_seg, shooting_params.no_rigid_seg,
+                              shooting_params.no_act_set, shooting_params.no_locmarkers,
+                              shooting_params.no_fcum_steps);
+
+    double mL_dummy[NUM_ACT_SET][3], nL_dummy[NUM_ACT_SET][3];
+    std::memcpy(mL_dummy, mL, sizeof(mL_dummy));
+    std::memcpy(nL_dummy, nL, sizeof(nL_dummy));
+
+    CRMDYNSolverIVP_Prep(
+        shooting_params.no_flex_seg, shooting_params.no_rigid_seg, shooting_params.no_act_set,
+        shooting_params.no_locmarkers, shooting_params.no_fcum_steps,
+        x_0, shooting_params.IntegrationStepSize,
+        shooting_params.Li, shooting_params.dlambdainv, const_cast<double*>(shooting_params.rho),
+        const_cast<CatheterSegmentType*>(shooting_params.SegmentTypes),
+        const_cast<double*>(shooting_params.SegEndLambdas),
+        const_cast<double*>(shooting_params.LocMarkerLambdas),
+        const_cast<double(*)[9]>(shooting_params.K), const_cast<double(*)[9]>(shooting_params.Kinv),
+        const_cast<double(*)[3]>(shooting_params.ustar),
+        const_cast<double(*)[3]>(shooting_params.MagMoment),
+        const_cast<double(*)[3]>(shooting_params.fcumlambda),
+        const_cast<double(*)[9]>(shooting_params.CoilAlignmentTurnAreaMatrix),
+        const_cast<double*>(shooting_params.B0), const_cast<double*>(shooting_params.g),
+        const_cast<double*>(shooting_params.ActMass), const_cast<double(*)[9]>(shooting_params.actInertia),
+        const_cast<double(*)[6]>(shooting_params.damping), shooting_params.DELTA_T,
+        const_cast<double(*)[3]>(shooting_params.v_L_pre), const_cast<double(*)[3]>(shooting_params.w_L_pre),
+        const_cast<double(*)[3]>(shooting_params.p_pre), const_cast<double(*)[9]>(shooting_params.R_pre),
+        mL_dummy, nL_dummy, FinalValueOnly, eqn_params
+    );
+
+    eqn_params.ContactMode = shooting_params.ContactMode;
+    mCopy_AB<3>(shooting_params.TipConstraintPoint, eqn_params.TipConstraintPoint);
+    mCopy_AB<3>(shooting_params.TipForce, eqn_params.TipForce);
+    for (int i = 0; i < NUM_STATES; ++i) {
+        eqn_params.xf[i] = xf[i];
+    }
+
+    double in_x_base[NUM_ACT_SET * 6];
+    for (int j_pack = 0; j_pack < NUM_ACT_SET; ++j_pack) {
+        for (int i_pack = 0; i_pack < 3; ++i_pack) {
+            in_x_base[i_pack + j_pack*6] = mL[j_pack][i_pack];
+            in_x_base[i_pack + j_pack*6 + 3] = nL[j_pack][i_pack];
+        }
+    }
+
+    Dual muhat_dual[NUM_ACT_SET][9];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        Dual MagMoment_dual[3];
+        for (int i = 0; i < 3; ++i) {
+            MagMoment_dual[i] = Dual(shooting_params.MagMoment[j][i], 0.0);
+        }
+        wHat_T<Dual>(MagMoment_dual, muhat_dual[j]);
+    }
+
+    for (int col = 0; col < dim_x; ++col) {
+        DYNNLEqnParams_T<Dual> params_dual = MakeDYNNLEqnParams_T<Dual>(eqn_params);
+
+        if (col < NUM_ACT_SET * 18) {
+            int act = col / 18;
+            int offset = col % 18;
+            if (offset < 3) {
+                params_dual.v_L_pre[act][offset] = Dual(eqn_params.v_L_pre[act][offset], 1.0);
+            } else if (offset < 6) {
+                params_dual.w_L_pre[act][offset - 3] = Dual(eqn_params.w_L_pre[act][offset - 3], 1.0);
+            } else if (offset < 9) {
+                params_dual.p_pre[act][offset - 6] = Dual(eqn_params.p_pre[act][offset - 6], 1.0);
+            } else {
+                params_dual.R_pre[act][offset - 9] = Dual(eqn_params.R_pre[act][offset - 9], 1.0);
+            }
+        } else {
+            int xf_idx = col - NUM_ACT_SET * 18;
+            params_dual.xf[xf_idx] = Dual(eqn_params.xf[xf_idx], 1.0);
+        }
+
+        Dual out_y_dual[NUM_ACT_SET * 6];
+        Dual out_u0_dual[3];
+        Dual out_tau_dual[NUM_ACT_SET * 3];
+
+        DYNNLEquation_T<Dual>(in_x_base, out_y_dual, params_dual, muhat_dual, out_u0_dual, out_tau_dual);
+
+        for (int row = 0; row < dim_y; ++row) {
+            J_yx(row, col) = out_y_dual[row].deriv;
+        }
+    }
 }
 
 

@@ -3,6 +3,7 @@
 #include "CRM_MatrixOperations.hpp"
 #include <math.h>
 #include <stdlib.h>
+#include <Eigen/Dense>
 
 #include "CRM.hpp"
 #include "CRM_BVPIVP_APIDeclarations.hpp"
@@ -161,6 +162,20 @@ void DYNSolverIVP(	CRMShootingMethodParams& in_Params, const double in_u0[3],
                       bool in_FinalValueOnly,
                       double out_x_N[NUM_STATES], double out_coil_state[NUM_ACT_SET][NUM_COIL_STATES],
                       double out_p_atLocMarkers[][3]);
+
+void DYNSolverIVP_JacobiansFullstate(
+        CRMShootingMethodParams& in_Params,
+        const double in_u0[3],
+        const double in_mL[NUM_ACT_SET][3],
+        const double in_nL[NUM_ACT_SET][3],
+        const double in_tau[NUM_ACT_SET][3],
+        const double in_ftip[3],
+        const double in_x_coil[NUM_ACT_SET][NUM_COIL_STATES],
+        const double in_xf[NUM_STATES],
+        Eigen::MatrixXd& J_xf_y,
+        Eigen::MatrixXd& J_xf_x,
+        Eigen::MatrixXd& J_xcoil_y,
+        Eigen::MatrixXd& J_xcoil_x);
 
 CRMShootingMethodParams CRMDYNConstructShootingMethodParamSet(	CRMCatheterModelParams CathParams, CatheterConfiguration CathConfig,
                                                                   double InsertionLength, double ActuationCurrents[NUM_ACT_SET][3],

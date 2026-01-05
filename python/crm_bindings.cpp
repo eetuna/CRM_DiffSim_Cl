@@ -6,6 +6,7 @@
 #include "CRM_TrueLegacyDynamics.hpp"
 #include "CRM_ReferenceHarness.hpp"
 #include "CRMDYN.hpp"
+#include "CRM_BVPJacobian.hpp"
 
 namespace py = pybind11;
 using namespace CRMCatheterModel;
@@ -49,6 +50,17 @@ py::dict py_true_legacy_linearize(
     py::dict params_dict,
     py::object mL_guess_obj,
     py::object nL_guess_obj
+);
+
+py::dict py_bvp_jacobians_fullstate(
+    py::array_t<double> mL_arr,
+    py::array_t<double> nL_arr,
+    py::array_t<double> x_coil_arr,
+    py::array_t<double> xf_arr,
+    py::array_t<double> u_arr,
+    double dt,
+    double L_inserted,
+    py::dict params_dict
 );
 
 py::dict py_crmdyn_reference_rollout(
@@ -351,6 +363,11 @@ PYBIND11_MODULE(crm_diff_py, m) {
           py::arg("mL_guess") = py::none(), py::arg("nL_guess") = py::none(),
           "Compute A, B linearization matrices using implicit function theorem.");
 
+    m.def("bvp_jacobians_fullstate", &py_bvp_jacobians_fullstate,
+          py::arg("mL"), py::arg("nL"), py::arg("x_coil"), py::arg("xf"),
+          py::arg("u"), py::arg("dt"), py::arg("L_inserted"), py::arg("params_dict"),
+          "Compute full BVP Jacobians J_yy, J_yu, J_yx for FULLSTATE.");
+
     // Reference harness for CRMDYN_test.cpp regression testing
     m.def("crmdyn_reference_rollout", &py_crmdyn_reference_rollout,
           py::arg("x0_coil"), py::arg("x0_tip"), py::arg("u_seq"), py::arg("dt"),
@@ -541,10 +558,20 @@ py::dict py_true_legacy_step_forward(
     double out_coil_state[NUM_ACT_SET][NUM_COIL_STATES];
     double out_markers[10][3];  // Placeholder, actual size depends on config
 
-    // Call DYNSolverIVP
-    DYNSolverIVP(params, out_u0, out_mL, out_nL, out_tau, out_ftip,
-                 true,  // FinalValueOnly
-                 out_xf, out_coil_state, out_markers);
+    if (out_localmin != 0) {
+        for (int i = 0; i < NUM_STATES; ++i) {
+            out_xf[i] = xf_data[i];
+        }
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < NUM_COIL_STATES; ++i) {
+                out_coil_state[j][i] = x_coil_data[j * 18 + i];
+            }
+        }
+    } else {
+        DYNSolverIVP(params, out_u0, out_mL, out_nL, out_tau, out_ftip,
+                     true,  // FinalValueOnly
+                     out_xf, out_coil_state, out_markers);
+    }
 
     // Package results
     py::dict result;
@@ -985,6 +1012,87 @@ py::dict py_true_legacy_linearize(
     result["qr_rank"] = qr_rank;
     result["rel_residual"] = rel_residual;
     result["converged"] = fwd_result.converged;
+
+    return result;
+}
+
+py::dict py_bvp_jacobians_fullstate(
+    py::array_t<double> mL_arr,
+    py::array_t<double> nL_arr,
+    py::array_t<double> x_coil_arr,
+    py::array_t<double> xf_arr,
+    py::array_t<double> u_arr,
+    double dt,
+    double L_inserted,
+    py::dict params_dict
+) {
+    auto mL_buf = mL_arr.request();
+    auto nL_buf = nL_arr.request();
+    auto x_coil_buf = x_coil_arr.request();
+    auto xf_buf = xf_arr.request();
+    auto u_buf = u_arr.request();
+
+    if (mL_buf.ndim != 2 || mL_buf.shape[0] != NUM_ACT_SET || mL_buf.shape[1] != 3) {
+        throw std::runtime_error("mL must be shape [" + std::to_string(NUM_ACT_SET) + ", 3]");
+    }
+    if (nL_buf.ndim != 2 || nL_buf.shape[0] != NUM_ACT_SET || nL_buf.shape[1] != 3) {
+        throw std::runtime_error("nL must be shape [" + std::to_string(NUM_ACT_SET) + ", 3]");
+    }
+    if (x_coil_buf.ndim != 2 || x_coil_buf.shape[0] != NUM_ACT_SET || x_coil_buf.shape[1] != 18) {
+        throw std::runtime_error("x_coil must be shape [" + std::to_string(NUM_ACT_SET) + ", 18]");
+    }
+    if (xf_buf.ndim != 1 || xf_buf.shape[0] != NUM_STATES) {
+        throw std::runtime_error("xf must be shape [15]");
+    }
+    if (u_buf.ndim != 2 || u_buf.shape[0] != NUM_ACT_SET || u_buf.shape[1] != 3) {
+        throw std::runtime_error("u must be shape [" + std::to_string(NUM_ACT_SET) + ", 3]");
+    }
+
+    double* mL_data = static_cast<double*>(mL_buf.ptr);
+    double* nL_data = static_cast<double*>(nL_buf.ptr);
+    double* x_coil_data = static_cast<double*>(x_coil_buf.ptr);
+    double* xf_data = static_cast<double*>(xf_buf.ptr);
+    double* u_data = static_cast<double*>(u_buf.ptr);
+
+    double mL[NUM_ACT_SET][3];
+    double nL[NUM_ACT_SET][3];
+    double x_coil[NUM_ACT_SET][18];
+    double xf[NUM_STATES];
+    double u[NUM_ACT_SET][3];
+
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 3; ++i) {
+            mL[j][i] = mL_data[j * 3 + i];
+            nL[j][i] = nL_data[j * 3 + i];
+            u[j][i] = u_data[j * 3 + i];
+        }
+        for (int i = 0; i < 18; ++i) {
+            x_coil[j][i] = x_coil_data[j * 18 + i];
+        }
+    }
+    for (int i = 0; i < NUM_STATES; ++i) {
+        xf[i] = xf_data[i];
+    }
+
+    CRMForwardKinematicsData fk_params = parse_fk_params(params_dict);
+
+    Eigen::MatrixXd J_yy, J_yu, J_yx;
+    compute_bvp_jacobians_full_analytic(
+        mL, nL, u, fk_params, xf, L_inserted, dt, x_coil, J_yy, J_yu, J_yx
+    );
+
+    py::dict result;
+    py::array_t<double> J_yy_arr({(size_t)J_yy.rows(), (size_t)J_yy.cols()});
+    py::array_t<double> J_yu_arr({(size_t)J_yu.rows(), (size_t)J_yu.cols()});
+    py::array_t<double> J_yx_arr({(size_t)J_yx.rows(), (size_t)J_yx.cols()});
+
+    std::memcpy(J_yy_arr.mutable_data(), J_yy.data(), J_yy.size() * sizeof(double));
+    std::memcpy(J_yu_arr.mutable_data(), J_yu.data(), J_yu.size() * sizeof(double));
+    std::memcpy(J_yx_arr.mutable_data(), J_yx.data(), J_yx.size() * sizeof(double));
+
+    result["J_yy"] = J_yy_arr;
+    result["J_yu"] = J_yu_arr;
+    result["J_yx"] = J_yx_arr;
 
     return result;
 }

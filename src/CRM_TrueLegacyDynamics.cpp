@@ -1,6 +1,5 @@
 #include "CRM_TrueLegacyDynamics.hpp"
 #include "CRM_MatrixOperations.hpp"
-#include "CRM_IVPJacobian.hpp"
 #include "CRM_BVPJacobian.hpp"
 #include <Eigen/Dense>
 #include <cstring>
@@ -200,7 +199,7 @@ int true_legacy_step_backward(
         v_xf_next[i] = grad_tip_p[i];
     }
 
-    // Step 2: Compute IVP Jacobians analytically using CRMSolverIVPJacobian
+    // Step 2: Compute IVP Jacobians analytically using DYNSolverIVP_JacobiansFullstate
     // Reconstruct shooting params for Jacobian computation
     double v_L_pre[NUM_ACT_SET][3];
     double w_L_pre[NUM_ACT_SET][3];
@@ -264,63 +263,32 @@ int true_legacy_step_backward(
         damping, fwd_result.dt
     );
 
-    // Compute deltau0 from converged solution
-    double deltau0[3];
-    for (int i = 0; i < 3; ++i) {
-        deltau0[i] = fwd_result.u0[i] - shooting_params.ustar[0][i];  // Assuming single segment
-    }
-
-    // Call IVP Jacobian (analytic)
-    double x_N[NUM_STATES];
-    double MomentResidual[3];
-    double ftip_copy[3];
-    for (int i = 0; i < 3; ++i) {
-        ftip_copy[i] = fwd_result.ftip[i];
-    }
-
-    auto [J_u, J_n, J_p, J_R, J_ftip] = CRMSolverIVPJacobian(
-        shooting_params, deltau0, ftip_copy, true, x_N, MomentResidual
+    Eigen::MatrixXd J_xf_y, J_xf_x, J_xcoil_y, J_xcoil_x;
+    DYNSolverIVP_JacobiansFullstate(
+        shooting_params,
+        fwd_result.u0,
+        fwd_result.mL,
+        fwd_result.nL,
+        fwd_result.tau,
+        fwd_result.ftip,
+        fwd_result.x_coil,
+        fwd_result.xf,
+        J_xf_y,
+        J_xf_x,
+        J_xcoil_y,
+        J_xcoil_x
     );
-
-    // J_u: (15 x 3) - ∂xf_next/∂u0
-    // J_n: (15 x 3*NUM_ACT_SET) - ∂xf_next/∂nL (per coil)
-    // J_p: (15 x 3*NUM_ACT_SET) - ∂xf_next/∂pL (coil positions)
-    // J_R: (15 x 9*NUM_ACT_SET) - ∂xf_next/∂RL (coil orientations)
-    // J_ftip: (15 x 3) - ∂xf_next/∂ftip
 
     // Step 3: Push cotangent through IVP Jacobians
     // v_y = J^T * v_xf_next, where y includes outputs that depend on BVP solution
 
-    Eigen::VectorXd v_u0 = J_u.transpose() * v_xf_next;  // (3,) - cotangent on base curvature
-
-    Eigen::VectorXd v_nL = J_n.transpose() * v_xf_next;  // (3*NUM_ACT_SET,) - cotangent on interface forces
-
-    Eigen::VectorXd v_p_coil = J_p.transpose() * v_xf_next;  // (3*NUM_ACT_SET,) - coil position cotangent
-    Eigen::VectorXd v_R_coil = J_R.transpose() * v_xf_next;  // (9*NUM_ACT_SET,) - coil orientation cotangent
+    Eigen::VectorXd v_y = J_xf_y.transpose() * v_xf_next;
 
     // Step 4: Assemble cotangent on BVP unknowns y = [mL; nL]
     // The BVP solves: r(y; x_coil, xf, u, dt) = 0 where y = [mL[0], nL[0], ..., mL[N-1], nL[N-1]]
     // Dimension: 6*NUM_ACT_SET (3 for mL + 3 for nL per actuator)
 
     const int dim_y = NUM_ACT_SET * 6;
-    Eigen::VectorXd v_y(dim_y);
-
-    // v_y receives cotangents from:
-    // 1. nL affects xf_next through IVP (via J_n), so v_y[nL components] = v_nL
-    // 2. mL affects coil dynamics and indirectly xf_next (currently minor, set to zero for simplicity)
-    //    A full implementation would trace mL -> tau -> coil dynamics -> IVP
-
-    for (int j = 0; j < NUM_ACT_SET; ++j) {
-        // mL components (indices 0-2 per actuator in y-vector as [mL;nL] interleaved)
-        // For now, set to zero (mL's main effect is through coil dynamics which is second-order)
-        for (int i = 0; i < 3; ++i) {
-            v_y[j * 6 + i] = 0.0;  // v_mL contribution (minimal direct path to xf_next)
-        }
-        // nL components (indices 3-5 per actuator)
-        for (int i = 0; i < 3; ++i) {
-            v_y[j * 6 + 3 + i] = v_nL[j * 3 + i];  // From J_n^T * v_xf_next
-        }
-    }
 
     // Step 5: Compute BVP Jacobian blocks J_yy, J_yu, and J_yx using strictly analytic methods (NO FD)
     Eigen::MatrixXd J_yy, J_yu, J_yx;
@@ -386,36 +354,15 @@ int true_legacy_step_backward(
 
     // Step 7: Compute gradients using implicit function theorem
 
-    // 7a. Direct gradients for xf (tip state)
+    Eigen::VectorXd grad_x_direct = J_xf_x.transpose() * v_xf_next;
+
     for (int i = 0; i < NUM_STATES; ++i) {
-        grad_xf[i] = v_xf_next[i];  // Direct passthrough (xf affects target)
+        grad_xf[i] = grad_x_direct[NUM_ACT_SET * 18 + i];
     }
 
-    // 7b. Gradients for x_coil (coil states)
-    // Direct contribution from IVP Jacobians (only p and R, NOT v and w)
     for (int j = 0; j < NUM_ACT_SET; ++j) {
-        // Position gradient (indices 6-8 in x_coil)
-        for (int i = 0; i < 3; ++i) {
-            grad_x_coil[j][6 + i] = v_p_coil[j*3 + i];
-        }
-        // Orientation gradient (indices 9-17 in x_coil)
-        for (int i = 0; i < 9; ++i) {
-            grad_x_coil[j][9 + i] = v_R_coil[j*9 + i];
-        }
-        // Velocity gradients (indices 0-2): from tip_p propagation
-        // tip_p depends on coil velocities via: p_tip = integrate(catheter_shape(p_coil, ...))
-        // For now, assume second-order effect (TODO: add if needed)
-        for (int i = 0; i < 3; ++i) {
-            grad_x_coil[j][i] = 0.0;
-        }
-        // Angular velocity gradients (indices 3-5): CRITICAL - comes from tip_p via catheter curvature
-        // The tip position depends on catheter shape, which depends on coil angular velocities
-        // through the mechanics. However, this is a SECOND-ORDER path in the VJP.
-        // The FIRST-ORDER path is: w affects next-step w through dynamics, which affects future tip_p.
-        // This is captured by the IVP integration over time, not in a single-step Jacobian.
-        // So for single-step VJP, w gradient from tip_p is minimal.
-        for (int i = 0; i < 3; ++i) {
-            grad_x_coil[j][3 + i] = 0.0;  // Will be populated if w→tip_p coupling is significant
+        for (int i = 0; i < 18; ++i) {
+            grad_x_coil[j][i] = grad_x_direct[j * 18 + i];
         }
     }
 
@@ -435,25 +382,42 @@ int true_legacy_step_backward(
         }
     }
 
-    // 7d. Gradients for u (actuation currents) via BVP implicit pathway
-    //
-    // The control u affects the BVP residual r(y,u) through the magnetic torque pathway:
-    //   u → MagMoment → τ_mag → coil dynamics → R_coil → residual
-    //
-    // This is captured by J_yu = ∂r/∂u, computed analytically in CRM_BVPJacobian.cpp.
-    //
-    // The VJP for u gradients uses implicit differentiation:
-    //   ∇_u L = -(J_yu)^T * λ
-    //
-    // where λ is the adjoint solution to (J_yy)^T * λ = v_y.
-    //
-    // NOTE: There is NO separate "direct pathway" for u gradients through w_next,
-    // because w does not appear in the IVP Jacobians (only p and R do).
-    // All u gradients flow through the BVP implicit pathway.
-    //
-    // See: docs/audits/SPRINT_S5_J_YU_DERIVATION.md
+    std::vector<Eigen::Matrix3d> dTau_du(NUM_ACT_SET);
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        const double* B = shooting_params.B0;
+        const double* A = shooting_params.CoilAlignmentTurnAreaMatrix[j];
+        dTau_du[j].setZero();
+        for (int i = 0; i < 3; ++i) {
+            double dM[3] = {A[0 * 3 + i], A[1 * 3 + i], A[2 * 3 + i]};
+            dTau_du[j](0, i) = dM[1] * B[2] - dM[2] * B[1];
+            dTau_du[j](1, i) = dM[2] * B[0] - dM[0] * B[2];
+            dTau_du[j](2, i) = dM[0] * B[1] - dM[1] * B[0];
+        }
+    }
 
-    Eigen::VectorXd grad_u_vec = -J_yu.transpose() * lambda;  // (3*NUM_ACT_SET,)
+    Eigen::VectorXd grad_u_direct = Eigen::VectorXd::Zero(NUM_ACT_SET * 3);
+    double dt = fwd_result.dt;
+
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        const double* actInertia = shooting_params.actInertia[j];
+        double I_xx = actInertia[0];
+        double I_yy = actInertia[4];
+        double I_zz = actInertia[8];
+
+        double v_w[3];
+        for (int k = 0; k < 3; ++k) {
+            v_w[k] = grad_x_coil[j][3 + k];
+        }
+
+        for (int i = 0; i < 3; ++i) {
+            grad_u_direct[j * 3 + i] += dt * dTau_du[j](0, i) / I_xx * v_w[0];
+            grad_u_direct[j * 3 + i] += dt * dTau_du[j](1, i) / I_yy * v_w[1];
+            grad_u_direct[j * 3 + i] += dt * dTau_du[j](2, i) / I_zz * v_w[2];
+        }
+    }
+
+    Eigen::VectorXd grad_u_implicit = -J_yu.transpose() * lambda;
+    Eigen::VectorXd grad_u_vec = grad_u_direct + grad_u_implicit;
 
     for (int j = 0; j < NUM_ACT_SET; ++j) {
         for (int i = 0; i < 3; ++i) {
@@ -547,22 +511,20 @@ int true_legacy_step_backward_batched(
         damping, fwd_result.dt
     );
 
-    // Compute deltau0 from converged solution
-    double deltau0[3];
-    for (int i = 0; i < 3; ++i) {
-        deltau0[i] = fwd_result.u0[i] - shooting_params.ustar[0][i];
-    }
-
-    // Call IVP Jacobian (analytic)
-    double x_N[NUM_STATES];
-    double MomentResidual[3];
-    double ftip_copy[3];
-    for (int i = 0; i < 3; ++i) {
-        ftip_copy[i] = fwd_result.ftip[i];
-    }
-
-    auto [J_u, J_n, J_p, J_R, J_ftip] = CRMSolverIVPJacobian(
-        shooting_params, deltau0, ftip_copy, true, x_N, MomentResidual
+    Eigen::MatrixXd J_xf_y, J_xf_x, J_xcoil_y, J_xcoil_x;
+    DYNSolverIVP_JacobiansFullstate(
+        shooting_params,
+        fwd_result.u0,
+        fwd_result.mL,
+        fwd_result.nL,
+        fwd_result.tau,
+        fwd_result.ftip,
+        fwd_result.x_coil,
+        fwd_result.xf,
+        J_xf_y,
+        J_xf_x,
+        J_xcoil_y,
+        J_xcoil_x
     );
 
     // Step 2: Compute BVP Jacobians (same for all RHS)
@@ -592,20 +554,7 @@ int true_legacy_step_backward_batched(
             v_xf_next[i] = grad_tip_p[i];
         }
 
-        // Push cotangent through IVP Jacobians
-        Eigen::VectorXd v_u0 = J_u.transpose() * v_xf_next;
-        Eigen::VectorXd v_nL = J_n.transpose() * v_xf_next;
-        Eigen::VectorXd v_p_coil = J_p.transpose() * v_xf_next;
-        Eigen::VectorXd v_R_coil = J_R.transpose() * v_xf_next;
-
-        // Assemble cotangent on BVP unknowns y = [mL; nL]
-        Eigen::VectorXd v_y(dim_y);
-        for (int j = 0; j < NUM_ACT_SET; ++j) {
-            for (int i = 0; i < 3; ++i) {
-                v_y[j * 6 + i] = 0.0;  // v_mL (minimal direct path)
-                v_y[j * 6 + 3 + i] = v_nL[j * 3 + i];
-            }
-        }
+        Eigen::VectorXd v_y = J_xf_y.transpose() * v_xf_next;
 
         // Solve adjoint system: (J_yy)^T * lambda = v_y (using pre-factored QR)
         Eigen::VectorXd lambda = qr_solver.solve(v_y);
@@ -632,25 +581,18 @@ int true_legacy_step_backward_batched(
             std::cerr.flush();
         }
 
-        // Compute gradients using implicit function theorem
-        // grad_xf = v_xf_next (direct passthrough)
+        Eigen::VectorXd grad_x_direct = J_xf_x.transpose() * v_xf_next;
+        const int dim_xcoil = NUM_ACT_SET * 18;
+
         double* grad_xf = grad_xf_batch + rhs_idx * NUM_STATES;
         for (int i = 0; i < NUM_STATES; ++i) {
-            grad_xf[i] = v_xf_next[i];
+            grad_xf[i] = grad_x_direct[dim_xcoil + i];
         }
 
-        // grad_x_coil (direct contribution from IVP Jacobians)
         double* grad_x_coil_flat = grad_x_coil_batch + rhs_idx * NUM_ACT_SET * 18;
-        std::memset(grad_x_coil_flat, 0, NUM_ACT_SET * 18 * sizeof(double));
-
         for (int j = 0; j < NUM_ACT_SET; ++j) {
-            // Position gradient
-            for (int i = 0; i < 3; ++i) {
-                grad_x_coil_flat[j * 18 + 6 + i] = v_p_coil[j * 3 + i];
-            }
-            // Orientation gradient
-            for (int i = 0; i < 9; ++i) {
-                grad_x_coil_flat[j * 18 + 9 + i] = v_R_coil[j * 9 + i];
+            for (int i = 0; i < 18; ++i) {
+                grad_x_coil_flat[j * 18 + i] = grad_x_direct[j * 18 + i];
             }
         }
 
@@ -667,30 +609,17 @@ int true_legacy_step_backward_batched(
 
         // grad_u: Direct (magnetic torque) + Implicit (BVP adjoint)
 
-        // Compute magnetic torque derivatives (same as linearization and single VJP)
+        // Compute magnetic torque derivatives (full turn-area matrix)
         std::vector<Eigen::Matrix3d> dTau_du(NUM_ACT_SET);
         for (int j = 0; j < NUM_ACT_SET; ++j) {
             const double* B = shooting_params.B0;
-            const double* M = shooting_params.MagMoment[j];
-
+            const double* A = shooting_params.CoilAlignmentTurnAreaMatrix[j];
+            dTau_du[j].setZero();
             for (int i = 0; i < 3; ++i) {
-                double dtau_du[3];
-                if (i == 0) {
-                    dtau_du[0] = 0.0;
-                    dtau_du[1] = -M[0] * B[2];
-                    dtau_du[2] = M[0] * B[1];
-                } else if (i == 1) {
-                    dtau_du[0] = M[1] * B[2];
-                    dtau_du[1] = 0.0;
-                    dtau_du[2] = -M[1] * B[0];
-                } else {  // i == 2
-                    dtau_du[0] = -M[2] * B[1];
-                    dtau_du[1] = M[2] * B[0];
-                    dtau_du[2] = 0.0;
-                }
-                for (int k = 0; k < 3; ++k) {
-                    dTau_du[j](k, i) = dtau_du[k];
-                }
+                double dM[3] = {A[0 * 3 + i], A[1 * 3 + i], A[2 * 3 + i]};
+                dTau_du[j](0, i) = dM[1] * B[2] - dM[2] * B[1];
+                dTau_du[j](1, i) = dM[2] * B[0] - dM[0] * B[2];
+                dTau_du[j](2, i) = dM[0] * B[1] - dM[1] * B[0];
             }
         }
 
@@ -824,27 +753,21 @@ int true_legacy_linearize_implicit(
     );
 
     // Step 2: Compute IVP Jacobians
-    double deltau0[3];
-    for (int i = 0; i < 3; ++i) {
-        deltau0[i] = fwd_result.u0[i] - shooting_params.ustar[0][i];
-    }
-
-    double x_N[NUM_STATES];
-    double MomentResidual[3];
-    double ftip_copy[3];
-    for (int i = 0; i < 3; ++i) {
-        ftip_copy[i] = fwd_result.ftip[i];
-    }
-
-    auto [J_u, J_n, J_p, J_R, J_ftip] = CRMSolverIVPJacobian(
-        shooting_params, deltau0, ftip_copy, true, x_N, MomentResidual
+    Eigen::MatrixXd J_xf_y, J_xf_x, J_xcoil_y, J_xcoil_x;
+    DYNSolverIVP_JacobiansFullstate(
+        shooting_params,
+        fwd_result.u0,
+        fwd_result.mL,
+        fwd_result.nL,
+        fwd_result.tau,
+        fwd_result.ftip,
+        fwd_result.x_coil,
+        fwd_result.xf,
+        J_xf_y,
+        J_xf_x,
+        J_xcoil_y,
+        J_xcoil_x
     );
-
-    // J_u: (15 x 3) - ∂xf_next/∂u0
-    // J_n: (15 x 3*NUM_ACT_SET) - ∂xf_next/∂nL
-    // J_p: (15 x 3*NUM_ACT_SET) - ∂xf_next/∂pL
-    // J_R: (15 x 9*NUM_ACT_SET) - ∂xf_next/∂RL
-    // J_ftip: (15 x 3) - ∂xf_next/∂ftip
 
     // Step 3: Compute BVP Jacobians
     Eigen::MatrixXd J_yy, J_yu, J_yx;
@@ -876,81 +799,28 @@ int true_legacy_linearize_implicit(
     Eigen::MatrixXd G_u = Eigen::MatrixXd::Zero(state_dim, control_dim);
     Eigen::MatrixXd G_y = Eigen::MatrixXd::Zero(state_dim, dim_y);
 
-    // G_x construction:
-    // - Coil states (first 18*N elements): mostly identity (direct propagation)
-    // - Tip state (last 15 elements): depends on coil positions/orientations via IVP
+    const int dim_xcoil = NUM_ACT_SET * 18;
+    G_x.topRows(dim_xcoil) = J_xcoil_x;
+    G_x.bottomRows(NUM_STATES) = J_xf_x;
 
-    // Coil state propagation (simplified: mostly identity for direct terms)
-    // Positions and orientations propagate based on velocities (this is a simplified model)
-    for (int j = 0; j < NUM_ACT_SET; ++j) {
-        int offset = j * 18;
-        // Position evolves: p_next = p + v*dt (indices 6-8 depend on indices 0-2)
-        for (int i = 0; i < 3; ++i) {
-            G_x(offset + 6 + i, offset + i) = fwd_result.dt;  // ∂p_next/∂v
-            G_x(offset + 6 + i, offset + 6 + i) = 1.0;         // ∂p_next/∂p
-        }
-        // Velocities and orientations (simplified: assume minor coupling)
-        for (int i = 0; i < 6; ++i) {
-            G_x(offset + i, offset + i) = 1.0;  // Direct passthrough
-        }
-        for (int i = 0; i < 9; ++i) {
-            G_x(offset + 9 + i, offset + 9 + i) = 1.0;  // Orientation passthrough
-        }
-    }
-
-    // Tip state depends on coil positions/orientations through IVP
-    int tip_offset = NUM_ACT_SET * 18;
-    // ∂xf_next/∂p_coil (from J_p)
-    for (int i = 0; i < NUM_STATES; ++i) {
-        for (int j = 0; j < NUM_ACT_SET; ++j) {
-            for (int k = 0; k < 3; ++k) {
-                G_x(tip_offset + i, j * 18 + 6 + k) = J_p(i, j * 3 + k);
-            }
-        }
-    }
-    // ∂xf_next/∂R_coil (from J_R)
-    for (int i = 0; i < NUM_STATES; ++i) {
-        for (int j = 0; j < NUM_ACT_SET; ++j) {
-            for (int k = 0; k < 9; ++k) {
-                G_x(tip_offset + i, j * 18 + 9 + k) = J_R(i, j * 9 + k);
-            }
-        }
-    }
+    G_y.topRows(dim_xcoil) = J_xcoil_y;
+    G_y.bottomRows(NUM_STATES) = J_xf_y;
 
     // G_u construction: ∂x_next/∂u
     // Coil angular velocities are directly affected by magnetic torques
     // Tip state is indirectly affected through BVP solution
     //
-    // Compute magnetic torque derivatives: ∂τ_mag/∂u
-    // Formula from BVP Jacobians (CRM_BVPJacobian.cpp:239-253):
-    // ∂τ_mag/∂u[i] = M[i] * (e_i × B)
-
+    // Compute magnetic torque derivatives (full turn-area matrix)
     std::vector<Eigen::Matrix3d> dTau_du(NUM_ACT_SET);
     for (int j = 0; j < NUM_ACT_SET; ++j) {
-        const double* B = shooting_params.B0;  // Magnetic field [3]
-        const double* M = shooting_params.MagMoment[j];  // Current magnetic moment [3]
-
-        // Compute ∂τ_mag/∂u[i] = M[i] * (e_i × B) for each control component
+        const double* B = shooting_params.B0;
+        const double* A = shooting_params.CoilAlignmentTurnAreaMatrix[j];
+        dTau_du[j].setZero();
         for (int i = 0; i < 3; ++i) {
-            double dtau_du[3];
-            if (i == 0) {
-                dtau_du[0] = 0.0;
-                dtau_du[1] = -M[0] * B[2];
-                dtau_du[2] = M[0] * B[1];
-            } else if (i == 1) {
-                dtau_du[0] = M[1] * B[2];
-                dtau_du[1] = 0.0;
-                dtau_du[2] = -M[1] * B[0];
-            } else {  // i == 2
-                dtau_du[0] = -M[2] * B[1];
-                dtau_du[1] = M[2] * B[0];
-                dtau_du[2] = 0.0;
-            }
-
-            // Store in column i of dTau_du[j]
-            for (int k = 0; k < 3; ++k) {
-                dTau_du[j](k, i) = dtau_du[k];
-            }
+            double dM[3] = {A[0 * 3 + i], A[1 * 3 + i], A[2 * 3 + i]};
+            dTau_du[j](0, i) = dM[1] * B[2] - dM[2] * B[1];
+            dTau_du[j](1, i) = dM[2] * B[0] - dM[0] * B[2];
+            dTau_du[j](2, i) = dM[0] * B[1] - dM[1] * B[0];
         }
     }
 
