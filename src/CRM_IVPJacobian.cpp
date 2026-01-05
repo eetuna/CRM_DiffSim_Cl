@@ -387,6 +387,43 @@ namespace CRMCatheterModel {
 		}
 	}
 
+	// ============================================================================
+	// SPRINT S14-STEP5C: Closed-form Jacobian helper for torque w.r.t. control
+	// ============================================================================
+	// Computes ∂Tb/∂u analytically for validation
+	// Given:
+	//   μ = A * u  (A = CoilAlignmentTurnAreaMatrix)
+	//   b = R^T * B0
+	//   Tb = μ × b
+	// Then:
+	//   ∂Tb/∂μ = -[b]_×  (since δ(μ × b) = δμ × b = -[b]_× δμ)
+	//   ∂Tb/∂u = (∂Tb/∂μ)(∂μ/∂u) = (-[b]_×) * A
+	// ============================================================================
+	inline void ComputeClosedFormTorqueJacobian_wrt_u(
+		const double R[9],                           // Rotation matrix
+		const double B0[3],                          // Magnetic field in spatial frame
+		const double CoilAlignmentTurnAreaMatrix[9], // A matrix (3x3)
+		double J_Tb_u_closed[9]                      // Output: ∂Tb/∂u (3x3)
+	) {
+		// Compute b = R^T * B0
+		double RTB0[3];
+		mMult_ATB<3, 3, 1>(R, B0, RTB0);
+
+		// Compute [b]_×
+		double RTB0hat[9];
+		wHat(RTB0, RTB0hat);
+
+		// Compute ∂Tb/∂u = (-[b]_×) * A
+		// First negate RTB0hat
+		double neg_RTB0hat[9];
+		for (int i = 0; i < 9; i++) {
+			neg_RTB0hat[i] = -RTB0hat[i];
+		}
+
+		// Then multiply: J = (-[b]_×) * A
+		mMult_AB<3, 3, 3>(neg_RTB0hat, CoilAlignmentTurnAreaMatrix, J_Tb_u_closed);
+	}
+
 	// we will overload this function
 	template<typename IVPJacobians>
 	void CRMSolverIVP_PropagateBCThroughRigidLink(AugmentedStateVector<IVPJacobians>& xi_ip1, double Residual_ip1[3],
@@ -480,18 +517,76 @@ namespace CRMCatheterModel {
 				// dTaudPhi term for the specific actuator that is on the current link
 				// - Kinv_ip1 * dTaudzc_link
 				//
-				// mKinv_ip1dTaudzc_link = Kinv_ip1 * mdTaudzc_link = Kinv_ip1 * -(- (R^T B0)^ (CATA)) , where CATA = CoilAlignmentMatrix * CoilTurnAreaMatrix
+				// SPRINT S14-STEP5C FIX: ∂Tb/∂u = (-[b]_×) * A, not ([b]_×) * A
+				// Physical derivation: Tb = μ × b, so δTb = δμ × b = -[b]_× δμ
+				// Therefore: ∂Tb/∂u = (∂Tb/∂μ)(∂μ/∂u) = (-[b]_×) * A
 				double RTB0[3];
 				mMult_ATB<3, 3, 1>(xf_i._R, B0, RTB0);
 				double RTB0hat[9];
 				wHat(RTB0, RTB0hat);
+				// Negate to get -[b]_×
+				double neg_RTB0hat[9];
+				for (int i = 0; i < 9; i++) neg_RTB0hat[i] = -RTB0hat[i];
 				double mdTaudzc_link[3 * 3];
-				mMult_AB<3, 3, 3>(RTB0hat, CoilAlignmentTurnAreaMatrix, mdTaudzc_link);
+				mMult_AB<3, 3, 3>(neg_RTB0hat, CoilAlignmentTurnAreaMatrix, mdTaudzc_link);
+
+				// ============================================================================
+				// SPRINT S14-STEP5C: Validate computed Jacobian against closed form
+				// ============================================================================
+				#ifdef DEBUG_S14_STEP5C_VALIDATE_JYU
+				{
+					double J_Tb_u_closed[9];
+					ComputeClosedFormTorqueJacobian_wrt_u(xf_i._R, B0, CoilAlignmentTurnAreaMatrix, J_Tb_u_closed);
+
+					// Compute difference: mdTaudzc_link - J_Tb_u_closed
+					double diff_norm = 0.0;
+					double closed_norm = 0.0;
+					for (int i = 0; i < 9; i++) {
+						double diff = mdTaudzc_link[i] - J_Tb_u_closed[i];
+						diff_norm += diff * diff;
+						closed_norm += J_Tb_u_closed[i] * J_Tb_u_closed[i];
+					}
+					diff_norm = std::sqrt(diff_norm);
+					closed_norm = std::sqrt(closed_norm);
+					double rel_error = (closed_norm > 1e-14) ? (diff_norm / closed_norm) : diff_norm;
+
+					std::cerr << "\n=== S14-STEP5C: J_yu Validation at ActNo=" << ActNo << " ===\n";
+					std::cerr << "Closed-form J_Tb_u (∂Tb/∂u = (-[b]_×)*A):\n";
+					for (int i = 0; i < 3; i++) {
+						for (int j = 0; j < 3; j++) {
+							std::cerr << J_Tb_u_closed[i * 3 + j] << " ";
+						}
+						std::cerr << "\n";
+					}
+					std::cerr << "\nComputed mdTaudzc_link ([b]_× * A):\n";
+					for (int i = 0; i < 3; i++) {
+						for (int j = 0; j < 3; j++) {
+							std::cerr << mdTaudzc_link[i * 3 + j] << " ";
+						}
+						std::cerr << "\n";
+					}
+					std::cerr << "\nDifference (computed - closed):\n";
+					for (int i = 0; i < 3; i++) {
+						for (int j = 0; j < 3; j++) {
+							std::cerr << (mdTaudzc_link[i * 3 + j] - J_Tb_u_closed[i * 3 + j]) << " ";
+						}
+						std::cerr << "\n";
+					}
+					std::cerr << "Relative error: " << rel_error << "\n";
+					std::cerr << "===============================================\n\n";
+				}
+				#endif
+				// ============================================================================
+
+				// SPRINT S14-STEP5C: ∂u_{i+1}/∂u_ctrl = (-Kinv_{i+1}) * (∂Tb/∂u_ctrl)
+				// The boundary condition is: u_{i+1} = ustar_{i+1} + Kinv_{i+1} * (Residual_i - Tb)
+				// So: ∂u_{i+1}/∂Tb = -Kinv_{i+1}
+				// Therefore we need the minus sign here
 				double mKinv_ip1dTaudzc_link[3 * 3];
 				mMult_AB<3, 3, 3>(Kinv_ip1, mdTaudzc_link, mKinv_ip1dTaudzc_link);
 				for (int i = 0; i < 3; i++)
 					for (int j = 0; j < 3; j++)
-						xi_ip1._u_zc[i * Cs + (ActNo * 3 + j)] += mKinv_ip1dTaudzc_link[i * 3 + j];
+						xi_ip1._u_zc[i * Cs + (ActNo * 3 + j)] -= mKinv_ip1dTaudzc_link[i * 3 + j];
 			}
 		}
 

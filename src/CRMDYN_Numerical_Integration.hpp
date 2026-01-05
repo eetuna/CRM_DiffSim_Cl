@@ -133,7 +133,7 @@ namespace CRMCatheterModel {
 
         // for simplicity, create aliases
         auto& u = in_x._u;
-        auto& R = in_x._R;  // R stays double (not differentiated)
+        auto& R = in_x._R;  // R is now type T (carries derivatives)
         auto& udot = out_xdot._u;
 
         // calculate interpolated value of fcum
@@ -170,14 +170,16 @@ namespace CRMCatheterModel {
         // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l); % udot
         //
         //   e3hat*R' = [ -r12 -r22 -r32; r11 r21 r31; 0 0 0];
-        double e3hatRT[9];
+        T e3hatRT[9];
         e3hatRT[0] = -R[1];   e3hatRT[1] = -R[4];   e3hatRT[2] = -R[7];
         e3hatRT[3] = R[0];    e3hatRT[4] = R[3];    e3hatRT[5] = R[6];
-        e3hatRT[6] = 0.0;     e3hatRT[7] = 0.0;     e3hatRT[8] = 0.0;
+        e3hatRT[6] = T(0.0);  e3hatRT[7] = T(0.0);  e3hatRT[8] = T(0.0);
         T e3hatRTfcum[3];
         mMult_AB_T<T, 3, 3, 1>(e3hatRT, fcum, e3hatRTfcum);  // e3m*R'*intf
         T RTl[3];
-        mMult_ATB_T<T, 3, 3, 1>(R, l, RTl);  // R'*l
+        T l_T[3];
+        for (int i = 0; i < 3; ++i) l_T[i] = T(l[i]);
+        mMult_ATB_T<T, 3, 3, 1>(R, l_T, RTl);  // R'*l
         T umustar[3];
         mSub_AB_T<T, 3, 1>(u, ustar, umustar);  // (u-ustar_s)
         T Kumustar[3], uhatKumustar[3];

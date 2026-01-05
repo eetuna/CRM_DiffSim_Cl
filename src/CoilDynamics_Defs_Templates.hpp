@@ -29,13 +29,16 @@ constexpr int DUAL_SUBSTEP_FACTOR = 5;
 // Forward declarations
 template<typename T>
 void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
-                    const double R[9], double actMass, const double actInertia[9],
+                    const T R[9], double actMass, const double actInertia[9],
                     const double damping[6], const double in_B0[3],
                     const T in_muhat[9], const T in_mL[3], T twistdot[6]);
 
 template<typename T>
-void DYNSE3_TimeSpace_T(const double in_R_n[9], const double in_p_n[3], double h,
-                        const T in_twist_n[6], double out_R_np1[9], T out_p_np1[3]);
+void Rodrigues_T(const T w[3], double h, T out_R_delta[9]);
+
+template<typename T>
+void DYNSE3_TimeSpace_T(const T in_R_n[9], const T in_p_n[3], double h,
+                        const T in_twist_n[6], T out_R_np1[9], T out_p_np1[3]);
 
 template<typename T>
 void RK2_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_n[3], const double g[3],
@@ -58,15 +61,15 @@ void ABM4_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_xdot_nm1[6],
 // ============================================================================
 template<typename T>
 void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
-                    const double R[9], double actMass, const double actInertia[9],
+                    const T R[9], double actMass, const double actInertia[9],
                     const double damping[6], const double in_B0[3],
                     const T in_muhat[9], const T in_mL[3], T twistdot[6]) {
 
     T v[3], w[3], n_L[3], m_L[3], B0_T[3], muhat[9];
-    double RTg[3];
+    T RTg[3];
     T w_v[3], w_hat[9], inertiaw[3], w_inertia_w[3], diff_tau_w[3];
     T vdot[3], wdot[3], Tb[3], tau[3];
-    double RscTB0[3];
+    T RscTB0[3];
 
     // Extract components from twist
     for (int i = 0; i < 3; ++i) {
@@ -84,8 +87,10 @@ void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
         muhat[i] = in_muhat[i];
     }
 
-    // Compute R^T * g (stays double since g is constant)
-    mMult_ATB<3,3,1>(R, g, RTg);
+    // Compute R^T * g (now templated since R is type T)
+    T g_T[3];
+    for (int i = 0; i < 3; ++i) g_T[i] = T(g[i]);
+    mMult_ATB_T<T,3,3,1>(R, g_T, RTg);
 
     // Compute skew-symmetric matrix from w
     wHat_T<T>(w, w_hat);
@@ -100,7 +105,7 @@ void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
     }
 
     for (int i = 0; i < 3; ++i) {
-        vdot[i] = T(RTg[i]) - n_L[i] / actMass - w_v[i] - damping_vec[i];
+        vdot[i] = RTg[i] - n_L[i] / actMass - w_v[i] - damping_vec[i];
     }
 
     // Angular acceleration: wdot = I^{-1} * (τ_mag - mL - w×(I*w) - damping*w)
@@ -122,13 +127,9 @@ void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
     mMult_AB_T<T,3,3,1>(w_hat_temp, inertiaw, w_inertia_w);
 
     // Compute magnetic torque: τ_mag = muhat * R^T * B0
-    mMult_ATB<3,3,1>(R, in_B0, RscTB0);  // R^T * B0 (stays double)
-
-    // Convert RscTB0 to T type for multiplication with muhat
-    T RscTB0_T[3];
-    for (int i = 0; i < 3; ++i) {
-        RscTB0_T[i] = T(RscTB0[i]);
-    }
+    T B0_temp[3];
+    for (int i = 0; i < 3; ++i) B0_temp[i] = T(in_B0[i]);
+    mMult_ATB_T<T,3,3,1>(R, B0_temp, RscTB0);  // R^T * B0 (now templated)
 
     // === DEBUG: Trace muhat derivatives before magnetic torque computation ===
     if constexpr (!std::is_same_v<T, double>) {
@@ -141,7 +142,7 @@ void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
         }
     }
 
-    mMult_AB_T<T,3,3,1>(muhat, RscTB0_T, Tb);  // Tb = muhat * R^T * B0
+    mMult_AB_T<T,3,3,1>(muhat, RscTB0, Tb);  // Tb = muhat * R^T * B0
 
     // === DEBUG: Trace magnetic torque derivatives ===
     if constexpr (!std::is_same_v<T, double>) {
@@ -182,16 +183,91 @@ void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
 }
 
 // ============================================================================
+// Rodrigues_T: Templated Rodrigues formula for rotation update via exponential map
+// ============================================================================
+template<typename T>
+void Rodrigues_T(const T w[3], double h, T out_R_delta[9]) {
+    // Compute rotation matrix from axis-angle using Rodrigues formula
+    // R_delta = exp(h * w_hat) = I + sin(theta)*w_normalized_hat + (1-cos(theta))*w_normalized_hat^2
+    // where theta = h * ||w|| and w_normalized = w / ||w||
+
+    T w_norm_sq = vNormSq_T<T, 3>(w);
+    T theta_sq = h * h * w_norm_sq;
+
+    // Extract value for theta comparison
+    double theta_sq_val;
+    if constexpr (std::is_same_v<T, double>) {
+        theta_sq_val = theta_sq;
+    } else {
+        theta_sq_val = theta_sq.val;
+    }
+
+    // Special case: theta ≈ 0 (use Taylor expansion to avoid division by zero)
+    if (theta_sq_val < EPS) {
+        // R_delta ≈ I + h*w_hat (first-order approximation)
+        // For exact case theta == 0: sinc(0) = 1, (1-cos(0))/theta^2 = 0.5
+        T w_hat[9];
+        wHat_T<T>(w, w_hat);
+
+        // I + h*w_hat
+        T I_val = T(1.0);
+        out_R_delta[0] = I_val + h * w_hat[0];
+        out_R_delta[1] = h * w_hat[1];
+        out_R_delta[2] = h * w_hat[2];
+        out_R_delta[3] = h * w_hat[3];
+        out_R_delta[4] = I_val + h * w_hat[4];
+        out_R_delta[5] = h * w_hat[5];
+        out_R_delta[6] = h * w_hat[6];
+        out_R_delta[7] = h * w_hat[7];
+        out_R_delta[8] = I_val + h * w_hat[8];
+    } else {
+        // Full Rodrigues formula
+        T theta = sqrt(theta_sq);
+        T w_norm = sqrt(w_norm_sq);
+        T w_normalized[3];
+        for (int i = 0; i < 3; ++i) {
+            w_normalized[i] = w[i] / w_norm;
+        }
+
+        T w_hat[9], w_hat_sq[9];
+        wHat_T<T>(w_normalized, w_hat);
+        mMult_AB_T<T, 3, 3, 3>(w_hat, w_hat, w_hat_sq);
+
+        // Compute sin(theta) and cos(theta) using templated functions
+        T sin_theta, cos_theta;
+        if constexpr (std::is_same_v<T, double>) {
+            sin_theta = std::sin(theta);
+            cos_theta = std::cos(theta);
+        } else {
+            // For Dual: use chain rule for sin/cos derivatives
+            double theta_val = theta.val;
+            double theta_deriv = theta.deriv;
+            sin_theta = T(std::sin(theta_val), std::cos(theta_val) * theta_deriv);
+            cos_theta = T(std::cos(theta_val), -std::sin(theta_val) * theta_deriv);
+        }
+
+        // R_delta = I + sin(theta)*w_hat + (1-cos(theta))*w_hat^2
+        T one_minus_cos = T(1.0) - cos_theta;
+
+        for (int i = 0; i < 9; ++i) {
+            T I_component = (i % 4 == 0) ? T(1.0) : T(0.0);  // Identity matrix elements
+            out_R_delta[i] = I_component + sin_theta * w_hat[i] + one_minus_cos * w_hat_sq[i];
+        }
+    }
+}
+
+// ============================================================================
 // DYNSE3_TimeSpace_T: Analytical SE(3) integration
 // ============================================================================
 template<typename T>
-void DYNSE3_TimeSpace_T(const double in_R_n[9], const T in_p_n[3], double h,
-                        const T in_twist_n[6], double out_R_np1[9], T out_p_np1[3]) {
-    double R_n[9];
+void DYNSE3_TimeSpace_T(const T in_R_n[9], const T in_p_n[3], double h,
+                        const T in_twist_n[6], T out_R_np1[9], T out_p_np1[3]) {
+    T R_n[9];
     T p_n[3];
     T v_n[3], w_n[3];
 
-    mCopy_AB<9>(in_R_n, R_n);
+    // Copy inputs (now template type T for rotation)
+    for (int i = 0; i < 9; ++i) R_n[i] = in_R_n[i];
     for (int i = 0; i < 3; ++i) p_n[i] = in_p_n[i];
 
     for (int i = 0; i < 3; ++i) {
@@ -199,84 +275,26 @@ void DYNSE3_TimeSpace_T(const double in_R_n[9], const T in_p_n[3], double h,
         w_n[i] = in_twist_n[i+3];
     }
 
-    // Compute p_dot = R_n * v_n
+    // Compute p_dot = R_n * v_n (templated matrix-vector multiplication)
     T p_dot[3];
-    T v_n_vals[3] = {v_n[0], v_n[1], v_n[2]};
-
-    // Since R_n is double and v_n is T, we need mixed-type multiplication
     for (int i = 0; i < 3; ++i) {
         p_dot[i] = T(0.0);
         for (int j = 0; j < 3; ++j) {
-            p_dot[i] += T(R_n[i*3 + j]) * v_n[j];
+            p_dot[i] += R_n[i*3 + j] * v_n[j];
         }
     }
 
-    // Compute ||w||^2
-    T umagsq = vNormSq_T<T,3>(w_n);
-
-    // Note: We'll keep R evolution as double since it doesn't carry u derivatives
-    // Only p carries derivatives through v
-    if (umagsq.val < EPS) {  // Access .val for Dual type
-        mCopy_AB<9>(R_n, out_R_np1);
-        for (int i = 0; i < 3; ++i) {
-            // Full derivative accumulation using Dual arithmetic
-            out_p_np1[i] = p_n[i] + p_dot[i] * h;
-        }
-    } else {
-        // Full Rodrigues formula for rotation (stays double)
-        T umagsqresp = T(1.0) / umagsq;
-        T umag = sqrt(umagsq);
-        T umagresp = T(1.0) / umag;
-
-        T unorm[3];
-        for (int i = 0; i < 3; ++i) {
-            unorm[i] = umagresp * w_n[i];
-        }
-
-        T delsumag = h * umag;
-
-        // For rotation matrix, we use the double values (no derivatives)
-        double w_n_double[3] = {w_n[0].val, w_n[1].val, w_n[2].val};
-        double umag_double = umag.val;
-        double unorm_double[3] = {unorm[0].val, unorm[1].val, unorm[2].val};
-        double delsumag_double = delsumag.val;
-
-        // Compute Rdelta using Rodrigues formula (double precision)
-        double Rdelta[9];
-        double unhat[9];
-        wHat(unorm_double, unhat);
-
-        double unhat2[9];
-        mMult_AB<3,3,3>(unhat, unhat, unhat2);
-
-        double I[9] = {1,0,0, 0,1,0, 0,0,1};
-        double term1[9], term2[9];
-
-        double sin_theta = std::sin(delsumag_double);
-        double cos_theta = std::cos(delsumag_double);
-
-        mMult_sA<3,3>(sin_theta, unhat, term1);
-        mMult_sA<3,3>(1.0 - cos_theta, unhat2, term2);
-
-        mAdd_ABC<3,3>(I, term1, term2, Rdelta);
-
-        // R_np1 = R_n * Rdelta
-        mMult_AB<3,3,3>(R_n, Rdelta, out_R_np1);
-
-        // For position, we need the full formula
-        // p_np1 = p_n + integral of (R(t) * v) dt
-
-        // Simplified: p_np1 ≈ p_n + R_n * v_n * h (Euler step)
-        // Correctly accumulate position derivatives: dp_{n+1}/du = dp_n/du + h * dv_n/du
-        for (int i = 0; i < 3; ++i) {
-            if constexpr (std::is_same_v<T, double>) {
-                out_p_np1[i] = p_n[i] + p_dot[i] * h;
-            } else {
-                // Full derivative accumulation using Dual arithmetic
-                out_p_np1[i] = T(p_n[i]) + p_dot[i] * h;
-            }
-        }
+    // Update position: p_{n+1} = p_n + h * p_dot
+    for (int i = 0; i < 3; ++i) {
+        out_p_np1[i] = p_n[i] + h * p_dot[i];
     }
+
+    // Update rotation using templated Rodrigues formula
+    T R_delta[9];
+    Rodrigues_T<T>(w_n, h, R_delta);
+
+    // R_{n+1} = R_n * R_delta (templated matrix multiplication)
+    mMult_AB_T<T, 3, 3, 3>(R_n, R_delta, out_R_np1);
 }
 
 // ============================================================================
@@ -289,13 +307,13 @@ void RK2_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_n[3], const doubl
                    T out_x_np1[NUM_COIL_STATES], T out_xdot_n[6], double h = t_step) {
 
     T nL[3], muhat[9], mL[3], twist_n[6];
-    double R_n[9];
+    T R_n[9];
     T p_n[3];
     T k1[6], k2oh[6], x_n_p_k1o2[6], xdot_n[6];
 
     // Extract state components
     for (int i = 0; i < 3; ++i) p_n[i] = in_x_n[i+6];  // Keep position derivatives
-    for (int i = 0; i < 9; ++i) R_n[i] = in_x_n[i+9].val;  // R is double (no derivatives)
+    for (int i = 0; i < 9; ++i) R_n[i] = in_x_n[i+9];  // R is now type T (carries derivatives)
     for (int i = 0; i < 6; ++i) twist_n[i] = in_x_n[i];
 
     for (int i = 0; i < 3; ++i) {
@@ -315,7 +333,7 @@ void RK2_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_n[3], const doubl
     }
 
     // Analytical SE(3) step for R and p at half-step
-    double R_np1half[9];
+    T R_np1half[9];
     T p_np1half[3];
     DYNSE3_TimeSpace_T<T>(R_n, p_n, h*0.5, twist_n, R_np1half, p_np1half);
 
@@ -328,13 +346,13 @@ void RK2_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_n[3], const doubl
     }
 
     // Analytical SE(3) step for R and p at full step
-    double R_np1[9];
+    T R_np1[9];
     T p_np1[3];
     DYNSE3_TimeSpace_T<T>(R_n, p_n, h, x_n_p_k1o2, R_np1, p_np1);
 
     // Pack position and rotation into output state
     for (int i = 0; i < 3; ++i) out_x_np1[i+6] = p_np1[i];
-    for (int i = 0; i < 9; ++i) out_x_np1[i+9] = T(R_np1[i]);
+    for (int i = 0; i < 9; ++i) out_x_np1[i+9] = R_np1[i];
 
     // === DEBUG: Check if position derivatives are exploding ===
     if constexpr (!std::is_same_v<T, double>) {
@@ -376,7 +394,7 @@ void ABM4_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_xdot_nm1[6],
     const double C_COEFF_Nm2 = 1.0/24.0;
 
     T twist_nm1[6], twist_nm2[6], twist_nm3[6], twist_n[6];
-    double R_n[9];
+    T R_n[9];
     T p_n[3];
     T x_np1_hat[6], xdot_np1_hat[6], xdot_n[6];
     T xdot_nm1[6], xdot_nm2[6], xdot_nm3[6];
@@ -393,7 +411,7 @@ void ABM4_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_xdot_nm1[6],
     }
 
     for (int i = 0; i < 3; ++i) p_n[i] = in_x_n[i+6];  // Keep position derivatives
-    for (int i = 0; i < 9; ++i) R_n[i] = in_x_n[i+9].val;
+    for (int i = 0; i < 9; ++i) R_n[i] = in_x_n[i+9];  // R is now type T (carries derivatives)
 
     T nL[3], muhat[9], mL[3];
     for (int i = 0; i < 3; ++i) {
@@ -418,7 +436,7 @@ void ABM4_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_xdot_nm1[6],
     }
 
     // Analytical SE(3) step for predicted state
-    double R_np1[9];
+    T R_np1[9];
     T p_np1[3];
     DYNSE3_TimeSpace_T<T>(R_n, p_n, h, x_np1_hat, R_np1, p_np1);
 
@@ -437,7 +455,7 @@ void ABM4_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_xdot_nm1[6],
 
     // Pack position and rotation
     for (int i = 0; i < 3; ++i) out_x_np1[i+6] = p_np1[i];
-    for (int i = 0; i < 9; ++i) out_x_np1[i+9] = T(R_np1[i]);
+    for (int i = 0; i < 9; ++i) out_x_np1[i+9] = R_np1[i];
 
     // Return current derivative
     for (int i = 0; i < 6; ++i) {
