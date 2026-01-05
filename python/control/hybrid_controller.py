@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-CP4.7: Hybrid MPC + Learned Policy Controller
+FULLSTATE Hybrid MPC + Learned Policy Controller
 
-Combines fast ensemble policy with correct-but-expensive MPC backup.
+Combines fast ensemble policy with correct-but-expensive MPC backup using TRUE legacy dynamics (18·N+15).
 Uses ensemble uncertainty to decide when to trust the policy vs invoke MPC.
 
 Key principle: Fast by default, safe when needed.
@@ -15,9 +15,9 @@ Decision logic:
     + SAFETY OVERRIDE if dynamics fail or tracking error exceeds limit
 
 Reuses:
-- EnsemblePolicy (CP4.5) for uncertainty estimation
-- iLQRSolver (CP3.2) for MPC with jacobian_mode="cpp" (CP4.4c)
-- dynamics_forward (CP2) for safety checks
+- EnsemblePolicy for uncertainty estimation
+- iLQRSolver with FULLSTATE dynamics and jacobian_mode="implicit"
+- true_legacy_step_forward for safety checks
 """
 
 import sys
@@ -31,12 +31,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'build'))
 
 from models.ensemble_policy import EnsemblePolicy
 from control.ilqr import iLQRSolver
+from control.true_legacy_state_adapter import (
+    pack_true_legacy_state, unpack_true_legacy_state, true_legacy_state_dim
+)
 import crm_diff_py
 
 
 class HybridController:
     """
-    Hybrid MPC + Ensemble Policy Controller.
+    Hybrid MPC + Ensemble Policy Controller with FULLSTATE dynamics.
 
     Uses ensemble uncertainty to decide when to trust the policy vs invoke MPC.
     Provides performance of learned policy with safety guarantees of MPC.
@@ -48,6 +51,7 @@ class HybridController:
         dt: float,
         L_inserted: float,
         params_dict: dict,
+        n_act: int = 1,
         tau_low: float = 0.001,
         tau_high: float = 0.01,
         tracking_safety_limit: float = 5.0,
@@ -61,10 +65,11 @@ class HybridController:
         Initialize hybrid controller.
 
         Args:
-            ensemble: Trained ensemble policy (from CP4.5)
+            ensemble: Trained ensemble policy
             dt: Timestep (seconds)
             L_inserted: Insertion length (mm)
             params_dict: Physics parameters
+            n_act: Number of actuator sets (default: 1)
             tau_low: Policy-only threshold (default: 0.001)
             tau_high: MPC-cold threshold (default: 0.01)
             tracking_safety_limit: Max tracking error before override (mm)
@@ -78,6 +83,11 @@ class HybridController:
         self.dt = dt
         self.L_inserted = L_inserted
         self.params_dict = params_dict
+        self.n_act = n_act
+
+        # FULLSTATE dimensions
+        self.state_dim = true_legacy_state_dim(n_act)  # 18*n_act + 15
+        self.control_dim = 3 * n_act
 
         # Thresholds
         self.tau_low = tau_low
@@ -115,13 +125,13 @@ class HybridController:
         Execute one control step.
 
         Args:
-            x_t: Current state (6,)
+            x_t: Current state (state_dim,)
             p_tip_t: Current tip position (3,)
             p_ref_horizon: Reference trajectory (H, 3) where H >= mpc_horizon
             hiddens: Recurrent hidden states (optional, uses internal state if None)
 
         Returns:
-            u_t: Control action (3,)
+            u_t: Control action (control_dim,)
             info: Dict with:
                 - 'mode': 'policy' | 'mpc_warm' | 'mpc_cold' | 'safety_override'
                 - 'uncertainty': float (max variance)
@@ -195,23 +205,17 @@ class HybridController:
         # Step 4: Safety check
         if self.dynamics_safety_checks:
             # Try the control and check if it's safe
-            result = crm_diff_py.dynamics_forward(
-                x_t, u_t, self.dt, self.L_inserted, self.params_dict
+            x_coil_t, xf_t = unpack_true_legacy_state(x_t, self.n_act)
+            result = crm_diff_py.true_legacy_step_forward(
+                x_coil_t, xf_t, u_t, self.dt, self.params_dict
             )
 
             status = result['status']
-            lu_rank = result.get('lu_rank', 6)
-            rel_residual = result.get('rel_solve_residual', 0.0)
-
-            dynamics_safe = (
-                status == 0 and
-                lu_rank == 6 and
-                rel_residual < 1e-10
-            )
+            dynamics_safe = (status == 0)
 
             # Check tracking error
             if dynamics_safe:
-                p_tip_next = result['p_tip']
+                p_tip_next = result['xf_next'][:3]
                 tracking_error = float(np.linalg.norm(p_tip_next - p_ref_horizon[0]))
                 info['tracking_error'] = tracking_error
 
@@ -243,13 +247,13 @@ class HybridController:
         Invoke MPC solver.
 
         Args:
-            x_t: Current state (6,)
+            x_t: Current state (state_dim,)
             p_ref_horizon: Reference trajectory (H, 3)
             warm_start_mode: 'policy' | 'shift' | 'cold'
             u_policy_hint: Policy suggestion for warm-start (if mode='policy')
 
         Returns:
-            u_t: Control action (3,)
+            u_t: Control action (control_dim,)
             info: Dict with MPC details
         """
         t_start = time.time()
@@ -280,13 +284,14 @@ class HybridController:
             L_inserted=self.L_inserted,
             params_dict=self.params_dict,
             horizon=self.mpc_horizon,
-            Q=np.zeros((6, 6)),  # No state cost
-            R=0.01 * np.eye(3),  # Control regularization
+            n_act=self.n_act,
+            Q=np.zeros((self.state_dim, self.state_dim)),  # No state cost
+            R=0.01 * np.eye(self.control_dim),  # Control regularization
             p_target=p_ref_mpc[0],  # Terminal target
             terminal_weight=1.0,
             max_iters=self.mpc_max_iters,
             tol=self.mpc_tol,
-            jacobian_mode="cpp"  # Use CP4.4c fast Jacobians
+            jacobian_mode="implicit"  # Use analytic implicit Jacobians
         )
 
         # Solve
@@ -307,7 +312,7 @@ class HybridController:
         except Exception as e:
             # MPC failed, return zero control
             mpc_time = time.time() - t_start
-            return np.zeros(3), {
+            return np.zeros(self.control_dim), {
                 'converged': False,
                 'mpc_time_ms': mpc_time * 1000.0,
                 'error': str(e),
@@ -324,21 +329,20 @@ class HybridController:
         Generate MPC warm-start by rolling out the policy.
 
         Args:
-            x_t: Current state (6,)
+            x_t: Current state (state_dim,)
             p_ref_horizon: Reference trajectory (H, 3)
             u_policy_hint: First control from policy
 
         Returns:
-            U_init: Control sequence (H, 3)
+            U_init: Control sequence (H, control_dim)
         """
         H = len(p_ref_horizon)
-        U_init = np.zeros((H, 3))
+        U_init = np.zeros((H, self.control_dim))
 
         # Use policy hint for first control
         U_init[0] = np.clip(u_policy_hint, *self.control_limits)
 
         # Fill rest with repeated hint (simple heuristic)
-        # More sophisticated: could rollout policy, but adds complexity
         for t in range(1, H):
             U_init[t] = U_init[0]
 
@@ -357,124 +361,44 @@ class HybridControllerMetrics:
         self.mpc_converged = []
         self.mpc_iters = []
 
-    def add_step(
-        self,
-        info: Dict[str, Any],
-        p_tip: np.ndarray,
-        p_ref: np.ndarray
-    ):
-        """
-        Add a timestep.
-
-        Args:
-            info: Info dict from HybridController.step()
-            p_tip: Actual tip position (3,)
-            p_ref: Reference tip position (3,)
-        """
-        self.steps.append(info.get('step', len(self.steps)))
+    def record(self, info: Dict[str, Any]):
+        """Record metrics from a control step."""
+        self.steps.append(info['step'])
         self.modes.append(info['mode'])
         self.uncertainties.append(info['uncertainty'])
+        if 'tracking_error' in info:
+            self.tracking_errors.append(info['tracking_error'])
+        if info['mpc_called']:
+            self.mpc_times.append(info['mpc_time_ms'])
+            self.mpc_converged.append(info['converged'])
+            self.mpc_iters.append(info['mpc_iters'])
 
-        # Tracking error
-        tracking_error = float(np.linalg.norm(p_tip - p_ref))
-        self.tracking_errors.append(tracking_error)
-
-        # MPC info
-        if info.get('mpc_called', False):
-            self.mpc_times.append(info.get('mpc_time_ms', 0.0))
-            self.mpc_converged.append(info.get('converged', False))
-            self.mpc_iters.append(info.get('mpc_iters', 0))
-
-    def get_summary(self) -> Dict[str, Any]:
+    def summary(self) -> Dict[str, Any]:
         """Compute summary statistics."""
-        n_steps = len(self.steps)
-        if n_steps == 0:
-            return {}
-
-        # Mode distribution
         mode_counts = {}
-        for mode in ['policy', 'mpc_warm', 'mpc_cold', 'safety_override']:
+        for mode in set(self.modes):
             mode_counts[mode] = self.modes.count(mode)
 
-        mode_distribution = {
-            mode: count / n_steps
-            for mode, count in mode_counts.items()
-        }
-
-        # MPC metrics
-        n_mpc_calls = sum(1 for m in self.modes if m != 'policy')
-        mpc_call_rate = n_mpc_calls / n_steps
-
-        # Tracking metrics
-        tracking_errors_arr = np.array(self.tracking_errors)
-        tracking_rmse = float(np.sqrt(np.mean(tracking_errors_arr**2)))
-        tracking_max = float(np.max(tracking_errors_arr))
-        tracking_mean = float(np.mean(tracking_errors_arr))
-
-        # Uncertainty-error correlation
-        if len(self.uncertainties) > 1 and len(self.tracking_errors) > 1:
-            corr_matrix = np.corrcoef(self.uncertainties, self.tracking_errors)
-            uncertainty_error_corr = float(corr_matrix[0, 1])
-        else:
-            uncertainty_error_corr = 0.0
-
         summary = {
-            'n_steps': n_steps,
-            'mpc_call_rate': mpc_call_rate,
-            'mode_distribution': mode_distribution,
-            'tracking_rmse': tracking_rmse,
-            'tracking_max': tracking_max,
-            'tracking_mean': tracking_mean,
+            'total_steps': len(self.steps),
+            'mode_counts': mode_counts,
+            'mode_percentages': {
+                mode: 100.0 * count / len(self.steps)
+                for mode, count in mode_counts.items()
+            },
             'mean_uncertainty': float(np.mean(self.uncertainties)),
-            'uncertainty_error_correlation': uncertainty_error_corr
+            'max_uncertainty': float(np.max(self.uncertainties)),
         }
 
-        # MPC-specific metrics
+        if self.tracking_errors:
+            summary['mean_tracking_error'] = float(np.mean(self.tracking_errors))
+            summary['max_tracking_error'] = float(np.max(self.tracking_errors))
+
         if self.mpc_times:
+            summary['mpc_calls'] = len(self.mpc_times)
             summary['mean_mpc_time_ms'] = float(np.mean(self.mpc_times))
             summary['max_mpc_time_ms'] = float(np.max(self.mpc_times))
-
-        if self.mpc_converged:
-            summary['mpc_convergence_rate'] = sum(self.mpc_converged) / len(self.mpc_converged)
-
-        if self.mpc_iters:
+            summary['mpc_convergence_rate'] = float(np.mean(self.mpc_converged))
             summary['mean_mpc_iters'] = float(np.mean(self.mpc_iters))
 
         return summary
-
-    def print_summary(self):
-        """Print summary to console."""
-        summary = self.get_summary()
-
-        print("\nHybrid Controller Metrics Summary")
-        print("=" * 60)
-        print(f"Total steps: {summary['n_steps']}")
-        print(f"MPC call rate: {summary['mpc_call_rate']:.1%}")
-        print()
-
-        print("Mode Distribution:")
-        for mode, frac in summary['mode_distribution'].items():
-            print(f"  {mode:20s}: {frac:6.1%}")
-        print()
-
-        print("Tracking Performance:")
-        print(f"  RMSE:  {summary['tracking_rmse']:.4f} mm")
-        print(f"  Max:   {summary['tracking_max']:.4f} mm")
-        print(f"  Mean:  {summary['tracking_mean']:.4f} mm")
-        print()
-
-        print("Uncertainty:")
-        print(f"  Mean: {summary['mean_uncertainty']:.6f}")
-        print(f"  Uncertainty-Error Correlation: {summary['uncertainty_error_correlation']:.3f}")
-        print()
-
-        if 'mean_mpc_time_ms' in summary:
-            print("MPC Performance:")
-            print(f"  Mean time: {summary['mean_mpc_time_ms']:.2f} ms")
-            print(f"  Max time:  {summary['max_mpc_time_ms']:.2f} ms")
-            if 'mpc_convergence_rate' in summary:
-                print(f"  Convergence rate: {summary['mpc_convergence_rate']:.1%}")
-            if 'mean_mpc_iters' in summary:
-                print(f"  Mean iterations: {summary['mean_mpc_iters']:.1f}")
-
-        print("=" * 60)

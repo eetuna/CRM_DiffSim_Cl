@@ -1,15 +1,6 @@
 /workspaces/CRM_DiffSim_Cl/build/CMakeFiles/CRMCPPLib.dir
 /workspaces/CRM_DiffSim_Cl/build/CMakeFiles/CRMDYNTest.dir
 /workspaces/CRM_DiffSim_Cl/build/CMakeFiles/CRMTest.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_cp15_harness.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_physics_audit.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_li_sweep.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_backward_bug.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_golden_backward.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_straight_rod.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_cp21_dynamics_smoke.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_cp22_dynamics_fd.dir
-/workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test_cp31_linearization.dir
 /workspaces/CRM_DiffSim_Cl/build/CMakeFiles/crm_diff_py.dir
 /workspaces/CRM_DiffSim_Cl/build/CMakeFiles/test.dir
 /workspaces/CRM_DiffSim_Cl/build/CMakeFiles/edit_cache.dir

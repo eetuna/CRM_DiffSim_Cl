@@ -35,8 +35,6 @@ set(CRMSOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_SupportFunctions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffEquilibrium.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffEquilibrium.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffDynamics.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_DiffDynamics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_TrueLegacyDynamics.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_TrueLegacyDynamics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CRM_BVPJacobian.hpp
@@ -108,122 +106,87 @@ target_include_directories(CRMDYNTest PUBLIC
     "${PROJECT_SOURCE_DIR}/numerical"
 )
 
-add_executable(test_cp15_harness
-    test_cp15_harness.cpp
-)
+# Commented out - test files not present (migration cleanup)
+# add_executable(test_cp15_harness
+#     test_cp15_harness.cpp
+# )
+# target_link_libraries(test_cp15_harness PUBLIC CRMCPPLib)
+# target_include_directories(test_cp15_harness PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-target_link_libraries(test_cp15_harness PUBLIC
-    CRMCPPLib
-)
+# add_executable(test_physics_audit
+#     test_physics_audit.cpp
+# )
+# target_link_libraries(test_physics_audit PUBLIC CRMCPPLib)
+# target_include_directories(test_physics_audit PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-target_include_directories(test_cp15_harness PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
+# add_executable(test_li_sweep
+#     test_li_sweep.cpp
+# )
+# target_link_libraries(test_li_sweep PUBLIC CRMCPPLib)
+# target_include_directories(test_li_sweep PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-add_executable(test_physics_audit
-    test_physics_audit.cpp
-)
+# add_executable(test_backward_bug
+#     test_backward_bug.cpp
+# )
+# target_link_libraries(test_backward_bug PUBLIC CRMCPPLib)
+# target_include_directories(test_backward_bug PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-target_link_libraries(test_physics_audit PUBLIC
-    CRMCPPLib
-)
+# add_executable(test_golden_backward
+#     test_golden_backward.cpp
+# )
+# target_link_libraries(test_golden_backward PUBLIC CRMCPPLib)
+# target_include_directories(test_golden_backward PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-target_include_directories(test_physics_audit PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
+# add_executable(test_straight_rod
+#     test_straight_rod.cpp
+# )
+# target_link_libraries(test_straight_rod PUBLIC CRMCPPLib)
+# target_include_directories(test_straight_rod PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-add_executable(test_li_sweep
-    test_li_sweep.cpp
-)
+# add_executable(test_cp21_dynamics_smoke
+#     test_cp21_dynamics_smoke.cpp
+# )
+# target_link_libraries(test_cp21_dynamics_smoke PUBLIC CRMCPPLib)
+# target_include_directories(test_cp21_dynamics_smoke PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-target_link_libraries(test_li_sweep PUBLIC
-    CRMCPPLib
-)
+# add_executable(test_cp22_dynamics_fd
+#     test_cp22_dynamics_fd.cpp
+# )
+# target_link_libraries(test_cp22_dynamics_fd PUBLIC CRMCPPLib)
+# target_include_directories(test_cp22_dynamics_fd PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
-target_include_directories(test_li_sweep PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
-
-add_executable(test_backward_bug
-    test_backward_bug.cpp
-)
-
-target_link_libraries(test_backward_bug PUBLIC
-    CRMCPPLib
-)
-
-target_include_directories(test_backward_bug PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
-
-add_executable(test_golden_backward
-    test_golden_backward.cpp
-)
-
-target_link_libraries(test_golden_backward PUBLIC
-    CRMCPPLib
-)
-
-target_include_directories(test_golden_backward PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
-
-add_executable(test_straight_rod
-    test_straight_rod.cpp
-)
-
-target_link_libraries(test_straight_rod PUBLIC
-    CRMCPPLib
-)
-
-target_include_directories(test_straight_rod PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
-
-add_executable(test_cp21_dynamics_smoke
-    test_cp21_dynamics_smoke.cpp
-)
-
-target_link_libraries(test_cp21_dynamics_smoke PUBLIC
-    CRMCPPLib
-)
-
-target_include_directories(test_cp21_dynamics_smoke PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
-
-add_executable(test_cp22_dynamics_fd
-    test_cp22_dynamics_fd.cpp
-)
-
-target_link_libraries(test_cp22_dynamics_fd PUBLIC
-    CRMCPPLib
-)
-
-target_include_directories(test_cp22_dynamics_fd PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
-
-add_executable(test_cp31_linearization
-    test_cp31_linearization.cpp
-)
-
-target_link_libraries(test_cp31_linearization PUBLIC
-    CRMCPPLib
-)
-
-target_include_directories(test_cp31_linearization PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/numerical"
-)
+# add_executable(test_cp31_linearization
+#     test_cp31_linearization.cpp
+# )
+# target_link_libraries(test_cp31_linearization PUBLIC CRMCPPLib)
+# target_include_directories(test_cp31_linearization PUBLIC
+#     "${PROJECT_SOURCE_DIR}/src"
+#     "${PROJECT_SOURCE_DIR}/numerical"
+# )
 
 # Python bindings (optional, requires pybind11)
 if(pybind11_FOUND)

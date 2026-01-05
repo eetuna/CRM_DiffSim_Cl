@@ -1,0 +1,777 @@
+# CRM_DiffSim_Cl — Forensic Audit Report (Exported)
+
+This file is an export of a read-only forensic audit. Every factual claim includes file:line evidence. FACT vs INFERENCE is explicit. No code changes are proposed here; this is evidence and mapping only.
+
+## 0) Repo Snapshot
+- FACT: Current branch is `true-legacy-dynamics-migration`. (`.git/HEAD:1`)
+- FACT: Current branch HEAD commit is `aeb2c7ebd85389fed5c4c70d3c56ac4930109a2b`. (`.git/refs/heads/true-legacy-dynamics-migration:1`)
+- FACT: `legacy_worktree/` is a git worktree (not an independent `.git` dir). (`legacy_worktree/.git:1`)
+- FACT: `legacy_worktree/` is on branch `main`. (`.git/worktrees/legacy_worktree/HEAD:1`)
+- FACT: `main` points to commit `828bf8cb705c138fbbf5f4d369913963a12ac83a`. (`.git/refs/heads/main:1`)
+- INFERENCE: `legacy_worktree/` is an authoritative baseline checkout under the same repo history. (Evidence: `legacy_worktree/.git:1`)
+
+## 1) Executive Summary (<= 1 page)
+- FACT: CMake builds `CRMCPPLib` + executables `CRMDYNTest`/`CRMTest` and optional pybind module `crm_diff_py`. (`CMakeLists.txt:57`, `CMakeLists.txt:75`, `CMakeLists.txt:83`, `CMakeLists.txt:193`)
+- FACT: Python default stack intends FULLSTATE TRUE legacy stepping via `crm_diff_py.true_legacy_step_forward` and `python/control/`. (`python/crm_bindings.cpp:301`, `python/control/__init__.py:25`)
+- FACT: `crm_diff_py` parameter parsing requires pointer objects `CathParams` and `CathConfig` in `params_dict`. (`python/crm_bindings.cpp:74`, `python/crm_bindings.cpp:75`)
+- FACT: Binding does not expose `load_cath_params/load_cath_config` (commented). (`python/crm_bindings.cpp:283`, `python/crm_bindings.cpp:287`)
+- INFERENCE: This blocks most Python runtime/test paths that need physics parameters. (Evidence: pointer requirement `python/crm_bindings.cpp:74`)
+- FACT: FULLSTATE controllers have signature mismatches with `pack_true_legacy_state` and `true_legacy_step_torch`. (`python/control/true_legacy_state_adapter.py:50`, `python/control/ilqr.py:153`, `python/control/true_legacy_step_autograd.py:184`, `python/control/ilqr.py:179`)
+
+## 2) Pass A Results: Entrypoints / Build / Current API
+### A1) Entrypoints
+- FACT: C++ `CRMTest` entrypoint `main`. (`main/CRMTest.cpp:34`)
+- FACT: C++ `CRMDYNTest` entrypoint `main`. (`main/CRMDYN_test.cpp:43`)
+- FACT: Tool script `tools/run_fullstate_sanity_gates.sh` orchestrates build + grep/rg gates. (`tools/run_fullstate_sanity_gates.sh:46`)
+
+### A2) Build wiring
+- FACT: `CRMCPPLib` is a static library. (`CMakeLists.txt:57`)
+- FACT: `crm_diff_py` is built from `python/crm_bindings.cpp` when `pybind11_FOUND`. (`CMakeLists.txt:193`)
+
+### A3) Current public API surface
+- FACT: `crm_diff_py` exports `equilibrium_forward/backward`. (`python/crm_bindings.cpp:292`, `python/crm_bindings.cpp:296`)
+- FACT: `crm_diff_py` exports `true_legacy_step_forward/vjp/vjp_batched/linearize`. (`python/crm_bindings.cpp:301`, `python/crm_bindings.cpp:308`, `python/crm_bindings.cpp:314`, `python/crm_bindings.cpp:320`)
+
+### A4) State/tensor shape locations
+- FACT: `NUM_STATES=15`, `NUM_ACT_SET=1` in C++ headers. (`src/CRM.hpp:13`, `src/CRM.hpp:14`)
+- FACT: TRUE legacy FULLSTATE dim is `18*N + 15` per Python adapter. (`python/control/true_legacy_state_adapter.py:6`)
+
+## 3) Pass B Results: Docs Audit / Contracts / Contradictions
+### B2) Authoritative contracts (extracted)
+- FACT: TRUE legacy contract doc is marked frozen ground truth. (`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:5`)
+- FACT: Core state dim `18N+15`. (`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:142`)
+- FACT: Step semantics are BVP then IVP. (`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:17`, `src/CRM_TrueLegacyDynamics.cpp:105`)
+
+### B3) Contradictions (examples; full evidence in main report body)
+- CONTRADICTION: `NUM_STATES` ordering comment vs actual state vector layout. (`src/CRM.hpp:13` vs `src/CRM_StateVector_Definitions.hpp:10`)
+- CONTRADICTION: FULLSTATE linearization “no C++ API” claim vs binding exports. (`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:106` vs `python/crm_bindings.cpp:320`)
+- CONTRADICTION: Controllers “operational” claim vs signature mismatches. (`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:15` vs `python/control/ilqr.py:153`)
+
+## 4) Pass C Results: Tests Mapping / Revalidation Suite v0
+- FACT: Current FULLSTATE tests exist under `tests/`. (e.g. `tests/test_fullstate_step_smoke.py:3`)
+- FACT: Archive tests exist under `python/archive/`. (e.g. `python/archive/test_a35_batched_vjp_lowlevel.py:2`)
+- FACT: Many tests assume `crm_diff_py.load_cath_params/load_cath_config`. (`python/crm_config.py:122`, `tests/test_fullstate_vjp_gradcheck_u.py:30`)
+
+### Revalidation Suite v0 (plan only)
+1. Build `crm_diff_py` (CMake). (`tools/run_fullstate_sanity_gates.sh:46`)
+2. Import + symbol smoke. (`tests/test_fullstate_quick_smoke.py:12`)
+3. Adapter-only roundtrip. (`python/archive/test_true_legacy_state_adapter.py:21`)
+4. Restore/verify params construction for pointer requirements. (`python/crm_bindings.cpp:74`)
+5. FULLSTATE step smoke. (`tests/test_fullstate_step_smoke.py:53`)
+6. FULLSTATE VJP FD check. (`tests/test_fullstate_vjp_gradcheck_u.py:45`)
+7. FULLSTATE linearize shapes. (`tests/test_fullstate_linearize_shapes.py:52`)
+8. A3.5 batched vs looped VJP equivalence. (`python/archive/test_a35_batched_vjp_lowlevel.py:29`)
+
+## 5) What is Working vs Broken vs Dead (table)
+| Component | Status | Evidence |
+|---|---|---|
+| `crm_diff_py` build target exists | WORKING-CANDIDATE | `CMakeLists.txt:193` |
+| TRUE legacy bindings exported in source | WORKING-CANDIDATE | `python/crm_bindings.cpp:301` |
+| Python param loading via binding | BROKEN/MISSING | `python/crm_bindings.cpp:283` |
+| FULLSTATE controllers run as-is | BROKEN | `python/control/ilqr.py:153` vs `python/control/true_legacy_state_adapter.py:50` |
+| CTest references archived binaries | BROKEN | `CMakeLists.txt:204` with `add_executable` commented `CMakeLists.txt:146` |
+
+## 6) Single Most Blocking Gap + evidence
+- FACT: Binding requires pointer objects in `params_dict`. (`python/crm_bindings.cpp:74`)
+- FACT: Loader bindings are commented out. (`python/crm_bindings.cpp:283`)
+- INFERENCE: This blocks most runtime validation and many tests. (Evidence: `tests/test_fullstate_linearize_shapes.py:37`)
+
+## 7) Recommended Next Step + why (evidence-based)
+- Recommendation: restore a supported Python path to create/load `CathParams`/`CathConfig` pointers (e.g., re-expose `load_cath_params/load_cath_config`) and then run the Revalidation Suite v0 items #2–#7. (Evidence: pointer requirement `python/crm_bindings.cpp:74`; disabled loaders `python/crm_bindings.cpp:283`)
+
+---
+# Appendix A — Full Docs Index (title line + ALL metadata matches)
+
+- `docs/CP5_0_FINDINGS.md` — title@`docs/CP5_0_FINDINGS.md:1`: # CP5.0: Hybrid Controller Performance Closure - Findings
+  - meta@`docs/CP5_0_FINDINGS.md:3`: **Date**: 2026-01-02
+  - meta@`docs/CP5_0_FINDINGS.md:4`: **Status**: Partial Completion - Infrastructure Validated, Quality Gates Not Yet Met
+  - meta@`docs/CP5_0_FINDINGS.md:29`: | Metric | Value | Target | Status |
+  - meta@`docs/CP5_0_FINDINGS.md:197`: - Status: PARTIAL
+- `docs/CP5_0_SUMMARY.txt` — title@`docs/CP5_0_SUMMARY.txt:1`: ================================================================================
+  - meta@`docs/CP5_0_SUMMARY.txt:4`: Date: 2026-01-02
+  - meta@`docs/CP5_0_SUMMARY.txt:5`: Status: PARTIAL COMPLETION - Infrastructure Validated, Quality Gates Not Met
+  - meta@`docs/CP5_0_SUMMARY.txt:29`: Metric                | Value        | Target      | Status
+  - meta@`docs/CP5_0_SUMMARY.txt:108`: • build/artifacts/cp50_consolidated_report.json   - Status summary
+- `docs/CP5_1_IMPLEMENTATION_SUMMARY.txt` — title@`docs/CP5_1_IMPLEMENTATION_SUMMARY.txt:34`: # Default: 20 windows, 3 members, 50 epochs
+  - meta@`docs/CP5_1_IMPLEMENTATION_SUMMARY.txt:4`: Date: 2026-01-02
+  - meta@`docs/CP5_1_IMPLEMENTATION_SUMMARY.txt:5`: Status: ✓ COMPLETE - All deliverables implemented and tested
+  - meta@`docs/CP5_1_IMPLEMENTATION_SUMMARY.txt:58`: Status: ✓ PASS
+  - meta@`docs/CP5_1_IMPLEMENTATION_SUMMARY.txt:238`: Status: ✓ IMPLEMENTATION COMPLETE
+- `docs/PHYSICS_AUDIT_REPORT.md` — title@`docs/PHYSICS_AUDIT_REPORT.md:1`: # Physics Audit Report: u=[0,0,0] and p_tip ≈ [0,0,L]
+  - meta@`docs/PHYSICS_AUDIT_REPORT.md:3`: **Date**: 2025-12-31
+- `docs/RELEASE_NOTES_CP2_CP3_P1.md` — title@`docs/RELEASE_NOTES_CP2_CP3_P1.md:1`: # RELEASE NOTES: CP2/CP3 Foundation + P1 Hardening
+  - meta@`docs/RELEASE_NOTES_CP2_CP3_P1.md:4`: **Date**: 2026-01-01
+  - meta@`docs/RELEASE_NOTES_CP2_CP3_P1.md:6`: **Status**: ✅ Production-Ready Snapshot (No Main Merge)
+  - meta@`docs/RELEASE_NOTES_CP2_CP3_P1.md:465`: **Status**: P1-4 profiling confirms bottleneck. Analytic gradients deferred (engineering effort vs. impact trade-off).
+  - meta@`docs/RELEASE_NOTES_CP2_CP3_P1.md:495`: **Status**: Documented workarounds sufficient for typical use cases. Not a bug, but intrinsic to local quadratic approximations.
+  - meta@`docs/RELEASE_NOTES_CP2_CP3_P1.md:597`: ### Check CI Status (if GitHub Actions enabled)
+  - meta@`docs/RELEASE_NOTES_CP2_CP3_P1.md:683`: **Status**: ✅ Production-ready for research use. Recommended next track: Control Robustness (Track 1) or Learning (Track 2) depending on application needs.
+- `docs/archive/reduced6d/README.md` — title@`docs/archive/reduced6d/README.md:1`: # Reduced 6D Dynamics (ARCHIVED - NON-LEGACY)
+  - meta@`docs/archive/reduced6d/README.md:9`: - **Status:** ARCHIVED - do not use for new code
+  - meta@`docs/archive/reduced6d/README.md:29`: ## Migration
+  - meta@`docs/archive/reduced6d/README.md:40`: ## Date Archived
+- `docs/archive/reduced6d/audits/LEGACY_CONTRACT_EXTRACTION_COMMAND_LOG.md` — title@`docs/archive/reduced6d/audits/LEGACY_CONTRACT_EXTRACTION_COMMAND_LOG.md:1`: # LEGACY CONTRACT EXTRACTION COMMAND LOG
+  - meta@`docs/archive/reduced6d/audits/LEGACY_CONTRACT_EXTRACTION_COMMAND_LOG.md:3`: **Date**: 2026-01-03
+  - meta@`docs/archive/reduced6d/audits/LEGACY_CONTRACT_EXTRACTION_COMMAND_LOG.md:489`: **Status**: ✅ **APPROVED**
+  - meta@`docs/archive/reduced6d/audits/LEGACY_CONTRACT_EXTRACTION_COMMAND_LOG.md:496`: **Date**: 2026-01-03
+- `docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md` — title@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:1`: # LEGACY VS CURRENT DIFFSIM DELTA
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:3`: **Date**: 2026-01-03
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:12`: **Status**: ⚠️ **SIGNIFICANT DIVERGENCE** — Current branch has added differentiable wrappers but may not match TRUE legacy contract.
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:123`: **Status in current**: ✅ **PRESENT** (not removed)
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:193`: **Status**: New addition, doesn't conflict with legacy dynamics.
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:486`: **Status**: ❌ **NO-GO**
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:502`: **Status**: ⚠️ **CONDITIONAL GO**
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:557`: **Status**: ⚠️ **AUDIT INCOMPLETE** — critical gaps remain.
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:563`: **Status**: ⚠️ **CONDITIONAL APPROVAL**
+  - meta@`docs/archive/reduced6d/audits/LEGACY_VS_CURRENT_DIFFSIM_DELTA.md:569`: **Date**: 2026-01-03
+- `docs/archive/reduced6d/contracts/LEGACY_HYBRID_STATE_CONTRACT.md` — title@`docs/archive/reduced6d/contracts/LEGACY_HYBRID_STATE_CONTRACT.md:1`: # Legacy Hybrid State Contract
+  - meta@`docs/archive/reduced6d/contracts/LEGACY_HYBRID_STATE_CONTRACT.md:5`: **Date**: 2026-01-03
+- `docs/audits/AUDIT_DOCS_MAP.md` — title@`docs/audits/AUDIT_DOCS_MAP.md:1`: # Documentation Audit - Structure and Contradictions
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:3`: **Audit Date**: 2026-01-04
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:16`: - ✅ Migration completion documented: `docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md`
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:28`: **Status**: FROZEN — Ground Truth
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:29`: **Date**: 2026-01-03
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:56`: **Status**: ARCHIVED (historical reference only)
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:103`: ## 3. Migration Documents
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:105`: ### 3.1 FULLSTATE Migration Completion
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:108`: **Date**: 2026-01-04
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:109`: **Status**: ✅ COMPLETE
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:128`: ### 3.2 Migration Plan
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:132`: **Content**: Migration strategy and execution plan
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:142`: ### 3.4 Controller Migration Guide
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:155`: **Date**: 2026-01-04 (recent)
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:167`: **Date**: 2026-01-04 (recent)
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:179`: **Date**: 2026-01-04 (recent)
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:200`: **Status**: Historical snapshots (v0, v1 iterations), superseded by FULLSTATE migration
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:354`: **Status**: Archived (historical reference only)
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:375`: - **Status**: EXPECTED — these are historical completion reports
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:379`: 2. **Recent Migration Docs**: Correctly document 18*N+15 state
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:402`: 2. **Migration completion well-documented** (MIGRATION_COMPLETION_REPORT_FULLSTATE.md)
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:448`: ### Migration Completion
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:452`: - Line 12: "Migration Status: **COMPLETE**"
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:458`: - Date: 2026-01-04
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:462`: - Date: 2026-01-04
+  - meta@`docs/audits/AUDIT_DOCS_MAP.md:466`: - Date: 2026-01-04
+- `docs/audits/AUDIT_FULLSTATE_STACK.md` — title@`docs/audits/AUDIT_FULLSTATE_STACK.md:1`: # FULLSTATE Stack Audit - End-to-End Verification
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:3`: **Audit Date**: 2026-01-04
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:17`: | Property | Status | Evidence |
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:29`: ### A.1 Repository Status
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:34`: Status: Modified files present (build artifacts, archive cleanup)
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:111`: **Date**: 2026-01-03
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:112`: **Status**: FROZEN — Ground Truth
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:300`: | Removed API | Status |
+  - meta@`docs/audits/AUDIT_FULLSTATE_STACK.md:356`: | Test | Type | Purpose | Status |
+- `docs/audits/CP4_0_DATASET_LEARNING_SCAFFOLD_COMPLETION.md` — title@`docs/audits/CP4_0_DATASET_LEARNING_SCAFFOLD_COMPLETION.md:1`: # CP4.0: Dataset + Learning Scaffold - Completion Report
+  - meta@`docs/audits/CP4_0_DATASET_LEARNING_SCAFFOLD_COMPLETION.md:3`: **Date:** 2026-01-01
+  - meta@`docs/audits/CP4_0_DATASET_LEARNING_SCAFFOLD_COMPLETION.md:5`: **Status:** ✅ COMPLETE
+  - meta@`docs/audits/CP4_0_DATASET_LEARNING_SCAFFOLD_COMPLETION.md:442`: **CP4.0 Status: ✅ COMPLETE**
+- `docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md` — title@`docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md:1`: # CP4.1: Dataset Standardization + Multi-Trajectory Training - Completion Report
+  - meta@`docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md:3`: **Date:** 2026-01-01
+  - meta@`docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md:5`: **Status:** ✅ COMPLETE
+  - meta@`docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md:21`: **Circle Dataset Status**: Circle NPZ files (`dyn_fk_ramp_circle1_*.npz`) lack reference trajectories (tip_projected/tip_desired). They are explicitly marked as "no_ref" and excluded from learning. Training currently uses only lemniscate datasets.
+  - meta@`docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md:322`: ### Current Status
+  - meta@`docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md:460`: **CP4.1 Status: ✅ COMPLETE**
+  - meta@`docs/audits/CP4_1_DATASET_STANDARDIZATION_COMPLETION.md:473`: **Circle Dataset Status**: Explicitly marked as "no_ref" and excluded from learning. This satisfies the requirement: "If circle NPZ lacks reference, add a clear path: either compute a reference from available fields or exclude from learning with an explicit 'no_ref' reason."
+- `docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md` — title@`docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md:1`: # CP4.2: NPZ Benchmark Evaluation - Completion Report
+  - meta@`docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md:3`: **Date:** 2026-01-01
+  - meta@`docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md:5`: **Status:** ✅ PARTIAL (Infrastructure complete, BC rollout limited by known issues)
+  - meta@`docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md:34`: **Status**: Infrastructure complete, BC rollout encounters solver issues
+  - meta@`docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md:40`: - **Status**: ✅ PASSING
+  - meta@`docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md:348`: **Status Summary**:
+  - meta@`docs/audits/CP4_2_EVAL_BENCHMARK_COMPLETION.md:421`: **CP4.2 Status**: ✅ **INFRASTRUCTURE COMPLETE**, ⚠️ **BC ROLLOUT LIMITED**
+- `docs/audits/CP4_3_DAGGER_COMPLETION.md` — title@`docs/audits/CP4_3_DAGGER_COMPLETION.md:1`: # CP4.3: DAgger (Dataset Aggregation) - Completion Report
+  - meta@`docs/audits/CP4_3_DAGGER_COMPLETION.md:3`: **Date:** 2026-01-01
+  - meta@`docs/audits/CP4_3_DAGGER_COMPLETION.md:5`: **Status:** ✅ COMPLETE
+  - meta@`docs/audits/CP4_3_DAGGER_COMPLETION.md:308`: **CP4.3 Status**: ✅ **COMPLETE**
+- `docs/audits/CP4_4a_RECURRENT_DAGGER_COMPLETION.md` — title@`docs/audits/CP4_4a_RECURRENT_DAGGER_COMPLETION.md:1`: # CP4.4a: Recurrent DAgger - Completion Report
+  - meta@`docs/audits/CP4_4a_RECURRENT_DAGGER_COMPLETION.md:3`: **Date:** 2026-01-02
+  - meta@`docs/audits/CP4_4a_RECURRENT_DAGGER_COMPLETION.md:5`: **Status:** ✅ COMPLETE
+  - meta@`docs/audits/CP4_4a_RECURRENT_DAGGER_COMPLETION.md:409`: **CP4.4a Status**: ✅ **COMPLETE**
+- `docs/audits/CP4_4b_FAST_JACOBIANS_COMPLETION.md` — title@`docs/audits/CP4_4b_FAST_JACOBIANS_COMPLETION.md:1`: # CP4.4b: Fast C++ Jacobians for iLQR/MPC - Completion Report
+  - meta@`docs/audits/CP4_4b_FAST_JACOBIANS_COMPLETION.md:3`: **Date:** 2026-01-02
+  - meta@`docs/audits/CP4_4b_FAST_JACOBIANS_COMPLETION.md:5`: **Status:** ✅ COMPLETE
+  - meta@`docs/audits/CP4_4b_FAST_JACOBIANS_COMPLETION.md:312`: **CP4.4b Status:** ✅ **COMPLETE**
+- `docs/audits/CP4_4c_BATCHED_VJP_COMPLETION.md` — title@`docs/audits/CP4_4c_BATCHED_VJP_COMPLETION.md:1`: # CP4.4c: Batched VJP for Faster Jacobians — COMPLETION AUDIT
+  - meta@`docs/audits/CP4_4c_BATCHED_VJP_COMPLETION.md:3`: **Status**: ✅ **COMPLETED**
+  - meta@`docs/audits/CP4_4c_BATCHED_VJP_COMPLETION.md:4`: **Date**: 2026-01-02
+- `docs/audits/CP4_5_ENSEMBLE_DAGGER_COMPLETION.md` — title@`docs/audits/CP4_5_ENSEMBLE_DAGGER_COMPLETION.md:1`: # CP4.5: Ensemble DAgger + Uncertainty Estimation — COMPLETION AUDIT
+  - meta@`docs/audits/CP4_5_ENSEMBLE_DAGGER_COMPLETION.md:3`: **Status**: ✅ **COMPLETED**
+  - meta@`docs/audits/CP4_5_ENSEMBLE_DAGGER_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_5_ENSEMBLE_DAGGER_COMPLETION.md:46`: - Status: PASSING (6.94s runtime)
+- `docs/audits/CP4_6_MULTITASK_DAGGER_COMPLETION.md` — title@`docs/audits/CP4_6_MULTITASK_DAGGER_COMPLETION.md:1`: # CP4.6: Multi-task Learning (Circle + Lemniscate) — COMPLETION AUDIT
+  - meta@`docs/audits/CP4_6_MULTITASK_DAGGER_COMPLETION.md:3`: **Status**: ✅ **COMPLETED**
+  - meta@`docs/audits/CP4_6_MULTITASK_DAGGER_COMPLETION.md:4`: **Date**: 2026-01-02
+- `docs/audits/CP4_7_1_THRESHOLD_CALIBRATION_COMPLETION.md` — title@`docs/audits/CP4_7_1_THRESHOLD_CALIBRATION_COMPLETION.md:1`: # CP4.7.1: Threshold Calibration + Trained Benchmark — COMPLETION AUDIT
+  - meta@`docs/audits/CP4_7_1_THRESHOLD_CALIBRATION_COMPLETION.md:3`: **Status**: ✅ **COMPLETED**
+  - meta@`docs/audits/CP4_7_1_THRESHOLD_CALIBRATION_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_1_THRESHOLD_CALIBRATION_COMPLETION.md:414`: | Configuration | MPC Rate | RMSE (mm) | Speedup | Status |
+- `docs/audits/CP4_7_2_END_TO_END_VALIDATION_COMPLETION.md` — title@`docs/audits/CP4_7_2_END_TO_END_VALIDATION_COMPLETION.md:1`: # CP4.7.2: End-to-End Trained Validation - Completion Audit
+  - meta@`docs/audits/CP4_7_2_END_TO_END_VALIDATION_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_2_END_TO_END_VALIDATION_COMPLETION.md:4`: **Date**: 2026-01-02
+- `docs/audits/CP4_7_3_HEALTH_GATED_CALIBRATION_COMPLETION.md` — title@`docs/audits/CP4_7_3_HEALTH_GATED_CALIBRATION_COMPLETION.md:1`: # CP4.7.3: Health-Gated Calibration + Real Threshold Calibration - Completion Audit
+  - meta@`docs/audits/CP4_7_3_HEALTH_GATED_CALIBRATION_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_3_HEALTH_GATED_CALIBRATION_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_3_HEALTH_GATED_CALIBRATION_COMPLETION.md:233`: **Status**: Unchanged by CP4.7.3
+  - meta@`docs/audits/CP4_7_3_HEALTH_GATED_CALIBRATION_COMPLETION.md:499`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_3_HEALTH_GATED_CALIBRATION_COMPLETION.md:501`: **Status**: ✓ Ready for PR
+- `docs/audits/CP4_7_4_GOLDEN_HEALTH_SUITE_COMPLETION.md` — title@`docs/audits/CP4_7_4_GOLDEN_HEALTH_SUITE_COMPLETION.md:1`: # CP4.7.4: Golden Health Suite - Completion Audit
+  - meta@`docs/audits/CP4_7_4_GOLDEN_HEALTH_SUITE_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_4_GOLDEN_HEALTH_SUITE_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_4_GOLDEN_HEALTH_SUITE_COMPLETION.md:315`: **Status**: ✓ PASSED
+  - meta@`docs/audits/CP4_7_4_GOLDEN_HEALTH_SUITE_COMPLETION.md:501`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_4_GOLDEN_HEALTH_SUITE_COMPLETION.md:503`: **Status**: ✓ Ready for PR
+- `docs/audits/CP4_7_5_WINDOWED_END_TO_END_COMPLETION.md` — title@`docs/audits/CP4_7_5_WINDOWED_END_TO_END_COMPLETION.md:1`: # CP4.7.5: Window-native End-to-End Hybrid Validation - Completion Audit
+  - meta@`docs/audits/CP4_7_5_WINDOWED_END_TO_END_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_5_WINDOWED_END_TO_END_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_5_WINDOWED_END_TO_END_COMPLETION.md:558`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_5_WINDOWED_END_TO_END_COMPLETION.md:560`: **Status**: ✓ Ready for PR
+- `docs/audits/CP4_7_6_GOLDEN_WINDOWS_DATASET_COMPLETION.md` — title@`docs/audits/CP4_7_6_GOLDEN_WINDOWS_DATASET_COMPLETION.md:1`: # CP4.7.6: Golden Windows + Dataset Regeneration - Completion Audit
+  - meta@`docs/audits/CP4_7_6_GOLDEN_WINDOWS_DATASET_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_6_GOLDEN_WINDOWS_DATASET_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_6_GOLDEN_WINDOWS_DATASET_COMPLETION.md:418`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_6_GOLDEN_WINDOWS_DATASET_COMPLETION.md:420`: **Status**: ✓ Ready for PR
+- `docs/audits/CP4_7_7_GOLDEN_PASS_AND_TRIAGE_COMPLETION.md` — title@`docs/audits/CP4_7_7_GOLDEN_PASS_AND_TRIAGE_COMPLETION.md:1`: # CP4.7.7: Golden-PASS Windowed Hybrid + Real-NPZ Triage Report - Completion Audit
+  - meta@`docs/audits/CP4_7_7_GOLDEN_PASS_AND_TRIAGE_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_7_GOLDEN_PASS_AND_TRIAGE_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP4_7_7_GOLDEN_PASS_AND_TRIAGE_COMPLETION.md:185`: | Status | `completed` | Run finishes successfully (not skipped or errored) |
+- `docs/audits/CP4_7_8_REAL_NPZ_TRIAGE_ACTIONS.md` — title@`docs/audits/CP4_7_8_REAL_NPZ_TRIAGE_ACTIONS.md:1`: # CP4.7.8: Real-NPZ Triage → Actionable Fixes - Completion Audit
+  - meta@`docs/audits/CP4_7_8_REAL_NPZ_TRIAGE_ACTIONS.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_8_REAL_NPZ_TRIAGE_ACTIONS.md:4`: **Date**: 2026-01-02
+- `docs/audits/CP4_7_9_QUALITY_GATED_BENCHMARK_COMPLETION.md` — title@`docs/audits/CP4_7_9_QUALITY_GATED_BENCHMARK_COMPLETION.md:1`: # CP4.7.9: Quality-Gated Hybrid Benchmarks - Completion Audit
+  - meta@`docs/audits/CP4_7_9_QUALITY_GATED_BENCHMARK_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP4_7_9_QUALITY_GATED_BENCHMARK_COMPLETION.md:4`: **Date**: 2026-01-02
+- `docs/audits/CP4_7_HYBRID_CONTROLLER_COMPLETION.md` — title@`docs/audits/CP4_7_HYBRID_CONTROLLER_COMPLETION.md:1`: # CP4.7: Hybrid MPC + Learned Policy Controller — COMPLETION AUDIT
+  - meta@`docs/audits/CP4_7_HYBRID_CONTROLLER_COMPLETION.md:3`: **Status**: ✅ **COMPLETED**
+  - meta@`docs/audits/CP4_7_HYBRID_CONTROLLER_COMPLETION.md:4`: **Date**: 2026-01-02
+- `docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md` — title@`docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md:1`: # CP5.1: Real-NPZ Windowed Ensemble Training - Completion Audit
+  - meta@`docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md:3`: **Status**: ✓ Implemented
+  - meta@`docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md:4`: **Date**: 2026-01-02
+  - meta@`docs/audits/CP5_1_REAL_WINDOW_TRAINING_COMPLETION.md:384`: | Metric | Value | Target | Status |
+- `docs/audits/FULLSTATE_CONTROLLER_API_AUDIT.md` — title@`docs/audits/FULLSTATE_CONTROLLER_API_AUDIT.md:1`: # FULLSTATE Controller API Audit
+  - meta@`docs/audits/FULLSTATE_CONTROLLER_API_AUDIT.md:3`: **Date**: 2026-01-04
+  - meta@`docs/audits/FULLSTATE_CONTROLLER_API_AUDIT.md:230`: | Primitive | Provider | Status |
+  - meta@`docs/audits/FULLSTATE_CONTROLLER_API_AUDIT.md:279`: **Migration complete**: MPC/iLQR are fully migrated to FULLSTATE default path.
+- `docs/audits/FULLSTATE_CPP_BACKEND_AUDIT.md` — title@`docs/audits/FULLSTATE_CPP_BACKEND_AUDIT.md:1`: # FULLSTATE C++ Backend Audit
+  - meta@`docs/audits/FULLSTATE_CPP_BACKEND_AUDIT.md:3`: **Date**: 2026-01-04
+- `docs/audits/FULLSTATE_DEFAULT_LEAK_AUDIT.md` — title@`docs/audits/FULLSTATE_DEFAULT_LEAK_AUDIT.md:1`: # FULLSTATE Default Leak Audit (Zero-Hit Gate)
+  - meta@`docs/audits/FULLSTATE_DEFAULT_LEAK_AUDIT.md:3`: **Date**: 2026-01-04
+  - meta@`docs/audits/FULLSTATE_DEFAULT_LEAK_AUDIT.md:316`: **Audit Date**: 2026-01-04
+  - meta@`docs/audits/FULLSTATE_DEFAULT_LEAK_AUDIT.md:323`: **Migration complete**:
+  - meta@`docs/audits/FULLSTATE_DEFAULT_LEAK_AUDIT.md:330`: **Status**: Ready for production deployment of FULLSTATE as default dynamics.
+- `docs/audits/MILESTONE_A_CORRECTION_GAP_REPORT.md` — title@`docs/audits/MILESTONE_A_CORRECTION_GAP_REPORT.md:1`: # Milestone A Correction Gap Report
+  - meta@`docs/audits/MILESTONE_A_CORRECTION_GAP_REPORT.md:4`: **Date**: 2026-01-03
+  - meta@`docs/audits/MILESTONE_A_CORRECTION_GAP_REPORT.md:5`: **Status**: A0 — Contract Extraction Complete
+- `docs/audits/MILESTONE_A_HYBRID_CONTRACT_VJP.md` — title@`docs/audits/MILESTONE_A_HYBRID_CONTRACT_VJP.md:1`: # Milestone A: Hybrid State Parity + Implicit VJP
+  - meta@`docs/audits/MILESTONE_A_HYBRID_CONTRACT_VJP.md:3`: **Status**: COMPLETE
+  - meta@`docs/audits/MILESTONE_A_HYBRID_CONTRACT_VJP.md:4`: **Date**: 2026-01-03
+- `docs/audits/NEXT_STEP_RECOMMENDATION.md` — title@`docs/audits/NEXT_STEP_RECOMMENDATION.md:1`: # Next Step Recommendation - Single Highest-Priority Action
+  - meta@`docs/audits/NEXT_STEP_RECOMMENDATION.md:3`: **Audit Date**: 2026-01-04
+- `docs/audits/P1_1_ROBUSTNESS_SWEEP_COMPLETION.md` — title@`docs/audits/P1_1_ROBUSTNESS_SWEEP_COMPLETION.md:1`: # P1-1 Completion: Robustness Sweep Stress Test
+  - meta@`docs/audits/P1_1_ROBUSTNESS_SWEEP_COMPLETION.md:3`: **Date**: 2026-01-01
+  - meta@`docs/audits/P1_1_ROBUSTNESS_SWEEP_COMPLETION.md:5`: **Status**: ✅ COMPLETE
+  - meta@`docs/audits/P1_1_ROBUSTNESS_SWEEP_COMPLETION.md:336`: | Criterion | Status | Evidence |
+- `docs/audits/P1_2_ILQR_LQR_WARMSTART_COMPLETION.md` — title@`docs/audits/P1_2_ILQR_LQR_WARMSTART_COMPLETION.md:1`: # P1-2 Completion: iLQR LQR Warm-Start
+  - meta@`docs/audits/P1_2_ILQR_LQR_WARMSTART_COMPLETION.md:3`: **Date**: 2026-01-01
+  - meta@`docs/audits/P1_2_ILQR_LQR_WARMSTART_COMPLETION.md:5`: **Status**: ✅ COMPLETE
+  - meta@`docs/audits/P1_2_ILQR_LQR_WARMSTART_COMPLETION.md:430`: | Criterion | Status | Evidence |
+- `docs/audits/P1_3_TERMINAL_HESSIAN_COMPLETION.md` — title@`docs/audits/P1_3_TERMINAL_HESSIAN_COMPLETION.md:1`: # P1-3: Exact Terminal Hessian for iLQR — Completion Report
+  - meta@`docs/audits/P1_3_TERMINAL_HESSIAN_COMPLETION.md:4`: **Date:** 2026-01-01
+- `docs/audits/P1_4_PROFILE_OPTIMIZE_COMPLETION.md` — title@`docs/audits/P1_4_PROFILE_OPTIMIZE_COMPLETION.md:1`: # P1-4: Profile + Optimize Dynamics Backward Pass — Completion Report
+  - meta@`docs/audits/P1_4_PROFILE_OPTIMIZE_COMPLETION.md:4`: **Date:** 2026-01-01
+- `docs/audits/P1_5_API_VERSIONING_COMPLETION.md` — title@`docs/audits/P1_5_API_VERSIONING_COMPLETION.md:1`: # P1-5: API Versioning Completion Audit
+  - meta@`docs/audits/P1_5_API_VERSIONING_COMPLETION.md:3`: **Date**: 2026-01-01
+  - meta@`docs/audits/P1_5_API_VERSIONING_COMPLETION.md:4`: **Status**: ✅ COMPLETE
+  - meta@`docs/audits/P1_5_API_VERSIONING_COMPLETION.md:197`: **Status**: PASSING ✅
+- `docs/audits/PRE_B0_BINDING_LAYER_AUDIT.md` — title@`docs/audits/PRE_B0_BINDING_LAYER_AUDIT.md:1`: # PRE-B0 C++ BINDING LAYER AUDIT
+  - meta@`docs/audits/PRE_B0_BINDING_LAYER_AUDIT.md:3`: **Audit Date:** 2026-01-04
+  - meta@`docs/audits/PRE_B0_BINDING_LAYER_AUDIT.md:7`: **Authority:** `python/crm_bindings.cpp` and new wrapper files in `src/`
+  - meta@`docs/audits/PRE_B0_BINDING_LAYER_AUDIT.md:18`: - ✅ Status codes returned, not thrown (physics failures expected)
+  - meta@`docs/audits/PRE_B0_BINDING_LAYER_AUDIT.md:292`: ### 4.2 Physics Solver Status Codes (Returned, Not Thrown)
+  - meta@`docs/audits/PRE_B0_BINDING_LAYER_AUDIT.md:404`: | Status codes (not exceptions) | ✅ Good | Physics failures expected |
+- `docs/audits/PRE_B0_COMPLETION_REPORT.md` — title@`docs/audits/PRE_B0_COMPLETION_REPORT.md:1`: # PRE-B0 AUDIT COMPLETION REPORT
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:3`: **Audit Date:** 2026-01-04
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:8`: **Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:23`: - ❌ **Singular matrix handling incomplete** (HIGH) → Status return needed
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:80`: | Status codes (not exceptions) | ✅ Good | Physics failures expected |
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:99`: | Finding | Status | Evidence |
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:228`: | Criterion | Status | Evidence |
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:290`: **Action 3: Return Failure Status for Singular Rotation**
+  - meta@`docs/audits/PRE_B0_COMPLETION_REPORT.md:371`: | Severity | Count | Status |
+- `docs/audits/PRE_B0_LEGACY_DYNAMICS_AUDIT.md` — title@`docs/audits/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:1`: # PRE-B0 LEGACY C++ DYNAMICS AUDIT
+  - meta@`docs/audits/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:3`: **Audit Date:** 2026-01-04
+  - meta@`docs/audits/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:7`: **Authority:** Read-only inspection via git worktree
+  - meta@`docs/audits/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:194`: **Status Code Propagation:**
+- `docs/audits/PRE_B0_PYTHON_CONTROL_AUDIT.md` — title@`docs/audits/PRE_B0_PYTHON_CONTROL_AUDIT.md:1`: # PRE-B0 PYTHON CONTROL LAYER AUDIT
+  - meta@`docs/audits/PRE_B0_PYTHON_CONTROL_AUDIT.md:3`: **Audit Date:** 2026-01-04
+  - meta@`docs/audits/PRE_B0_PYTHON_CONTROL_AUDIT.md:7`: **Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
+  - meta@`docs/audits/PRE_B0_PYTHON_CONTROL_AUDIT.md:332`: **Convergence Status** (returned in observables):
+  - meta@`docs/audits/PRE_B0_PYTHON_CONTROL_AUDIT.md:442`: | Finding | Status | Evidence |
+- `docs/audits/PRE_B0_RISKS_AND_MITIGATIONS.md` — title@`docs/audits/PRE_B0_RISKS_AND_MITIGATIONS.md:1`: # PRE-B0 RISKS AND MITIGATIONS
+  - meta@`docs/audits/PRE_B0_RISKS_AND_MITIGATIONS.md:3`: **Audit Date:** 2026-01-04
+  - meta@`docs/audits/PRE_B0_RISKS_AND_MITIGATIONS.md:7`: **Authority:** Legacy C++ + Binding + Python Control audits
+  - meta@`docs/audits/PRE_B0_RISKS_AND_MITIGATIONS.md:54`: **Option A: Re-enable with Status Return** (RECOMMENDED)
+  - meta@`docs/audits/PRE_B0_RISKS_AND_MITIGATIONS.md:112`: **Option A: Return Failure Status** (RECOMMENDED)
+- `docs/audits/PROJECT_AUDIT_CP2_CP3.md` — title@`docs/audits/PROJECT_AUDIT_CP2_CP3.md:1`: # PROJECT AUDIT: CP2.x + CP3.x Differentiable Dynamics & Control
+  - meta@`docs/audits/PROJECT_AUDIT_CP2_CP3.md:3`: **Date**: 2026-01-01
+  - meta@`docs/audits/PROJECT_AUDIT_CP2_CP3.md:13`: ### Overall Status: ✅ SOLID FOUNDATION WITH KNOWN LIMITATIONS
+  - meta@`docs/audits/PROJECT_AUDIT_CP2_CP3.md:64`: | Checkpoint | Scope | Status | Deviations |
+  - meta@`docs/audits/PROJECT_AUDIT_CP2_CP3.md:77`: | Checkpoint | Scope | Status | Deviations |
+  - meta@`docs/audits/PROJECT_AUDIT_CP2_CP3.md:346`: - Status == 0 ✅
+- `docs/audits/PROJECT_AUDIT_EXEC_SUMMARY.md` — title@`docs/audits/PROJECT_AUDIT_EXEC_SUMMARY.md:1`: # PROJECT AUDIT: Executive Summary
+  - meta@`docs/audits/PROJECT_AUDIT_EXEC_SUMMARY.md:4`: **Date**: 2026-01-01
+  - meta@`docs/audits/PROJECT_AUDIT_EXEC_SUMMARY.md:20`: - **Status**: All dynamics gradients validated against finite differences
+- `docs/audits/TRUE_LEGACY_BVP_UNKNOWN_AUDIT.md` — title@`docs/audits/TRUE_LEGACY_BVP_UNKNOWN_AUDIT.md:1`: # TRUE LEGACY BVP UNKNOWN AUDIT
+  - meta@`docs/audits/TRUE_LEGACY_BVP_UNKNOWN_AUDIT.md:3`: **Date**: 2026-01-03
+  - meta@`docs/audits/TRUE_LEGACY_BVP_UNKNOWN_AUDIT.md:448`: **Status**: ✅ **VERIFIED**
+  - meta@`docs/audits/TRUE_LEGACY_BVP_UNKNOWN_AUDIT.md:454`: **Date**: 2026-01-03
+- `docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md` — title@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:1`: # TRUE LEGACY CONTRACT COMPLETION REPORT
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:3`: **Date**: 2026-01-03
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:6`: **Status**: ✅ **COMPLETE**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:25`: **Status**: ✅ **SUCCESS — Contract Frozen**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:245`: **Status**: ✅ **ALL DELIVERED**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:258`: **Status**: ✅ **ALL SATISFIED**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:270`: **Status**: ✅ **ALL MET**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:286`: **Status**: ✅ **STOP CONDITION REACHED**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:397`: ### 10.3 Approval Status
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:437`: **Audit Status**: ✅ **COMPLETE**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:438`: **Contract Status**: ✅ **FROZEN**
+  - meta@`docs/audits/TRUE_LEGACY_CONTRACT_COMPLETION_REPORT.md:460`: **Date**: 2026-01-03
+- `docs/audits/TRUE_LEGACY_STEP_ENTRYPOINT_AUDIT.md` — title@`docs/audits/TRUE_LEGACY_STEP_ENTRYPOINT_AUDIT.md:1`: # TRUE LEGACY STEP ENTRYPOINT AUDIT
+  - meta@`docs/audits/TRUE_LEGACY_STEP_ENTRYPOINT_AUDIT.md:3`: **Date**: 2026-01-03
+  - meta@`docs/audits/TRUE_LEGACY_STEP_ENTRYPOINT_AUDIT.md:408`: **Status**: ✅ **VERIFIED**
+  - meta@`docs/audits/TRUE_LEGACY_STEP_ENTRYPOINT_AUDIT.md:414`: **Date**: 2026-01-03
+- `docs/audits/sandbox/v0/PRE_B0_BINDING_LAYER_AUDIT.md` — title@`docs/audits/sandbox/v0/PRE_B0_BINDING_LAYER_AUDIT.md:1`: # Pre-B0 C++ Binding Layer Audit
+  - meta@`docs/audits/sandbox/v0/PRE_B0_BINDING_LAYER_AUDIT.md:3`: **Audit Date**: 2026-01-03
+  - meta@`docs/audits/sandbox/v0/PRE_B0_BINDING_LAYER_AUDIT.md:11`: **Status**: ✅ **SAFE FOR B0** with monitoring recommendations
+- `docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md` — title@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:1`: # Pre-B0 Audit Completion Report
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:3`: **Audit Date**: 2026-01-03
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:22`: | Audit | Document | Status | Verdict |
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:176`: | Severity | Count | Status |
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:187`: - **Status**: ✅ **Acceptable** with testing
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:192`: - **Status**: ✅ **Mitigated** (30 min implementation)
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:197`: - **Status**: ✅ **Mitigated** (10 min implementation)
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:209`: | # | Action | Owner | Effort | Status |
+  - meta@`docs/audits/sandbox/v0/PRE_B0_COMPLETION_REPORT.md:266`: | Criterion | Threshold | Status | Evidence |
+- `docs/audits/sandbox/v0/PRE_B0_LEGACY_DYNAMICS_AUDIT.md` — title@`docs/audits/sandbox/v0/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:1`: # Pre-B0 Legacy C++ Dynamics Audit
+  - meta@`docs/audits/sandbox/v0/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:3`: **Audit Date**: 2026-01-03
+  - meta@`docs/audits/sandbox/v0/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:11`: **Status**: ✅ **SAFE FOR B0**
+- `docs/audits/sandbox/v0/PRE_B0_PYTHON_CONTROL_AUDIT.md` — title@`docs/audits/sandbox/v0/PRE_B0_PYTHON_CONTROL_AUDIT.md:1`: # Pre-B0 Python Control Layer Audit
+  - meta@`docs/audits/sandbox/v0/PRE_B0_PYTHON_CONTROL_AUDIT.md:3`: **Audit Date**: 2026-01-03
+  - meta@`docs/audits/sandbox/v0/PRE_B0_PYTHON_CONTROL_AUDIT.md:11`: **Status**: ✅ **SAFE FOR B0**
+- `docs/audits/sandbox/v0/PRE_B0_RISKS_AND_MITIGATIONS.md` — title@`docs/audits/sandbox/v0/PRE_B0_RISKS_AND_MITIGATIONS.md:1`: # Pre-B0 Risks and Mitigations
+  - meta@`docs/audits/sandbox/v0/PRE_B0_RISKS_AND_MITIGATIONS.md:3`: **Audit Date**: 2026-01-03
+  - meta@`docs/audits/sandbox/v0/PRE_B0_RISKS_AND_MITIGATIONS.md:26`: | ID | Risk | Layer | Severity | Probability | Priority | Status |
+  - meta@`docs/audits/sandbox/v0/PRE_B0_RISKS_AND_MITIGATIONS.md:431`: | Criterion | Status | Evidence |
+- `docs/audits/sandbox/v1/PRE_B0_BINDING_LAYER_AUDIT.md` — title@`docs/audits/sandbox/v1/PRE_B0_BINDING_LAYER_AUDIT.md:1`: # PRE-B0 C++ BINDING LAYER AUDIT
+  - meta@`docs/audits/sandbox/v1/PRE_B0_BINDING_LAYER_AUDIT.md:3`: **Audit Date:** 2026-01-03
+  - meta@`docs/audits/sandbox/v1/PRE_B0_BINDING_LAYER_AUDIT.md:238`: - Status surfaced to Python
+- `docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md` — title@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:1`: # PRE-B0 AUDIT COMPLETION REPORT (CORRECTED)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:3`: **Audit Date:** 2026-01-03
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:8`: **Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:88`: **Status:** Clean (no uncommitted changes)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:139`: | Finding | Evidence | Status |
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:147`: | Finding | Evidence | Status |
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:193`: - Status checking (BVP convergence)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:207`: # Status validation
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:221`: - Test 1: Status validation (BVP failure → exception)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:292`: - Status checking (BVP convergence)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_COMPLETION_REPORT.md:354`: **Audit Status:** COMPLETE ✅ (with user decision required)
+- `docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md` — title@`docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md:1`: # PRE-B0 CORRECTION NOTE
+  - meta@`docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md:3`: **Date:** 2026-01-03
+  - meta@`docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md:5`: **Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
+  - meta@`docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md:233`: | Module | Purpose | State Contract | Status |
+  - meta@`docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md:359`: **Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md` (FROZEN ground truth)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md:360`: **Date:** 2026-01-03
+  - meta@`docs/audits/sandbox/v1/PRE_B0_CORRECTION_NOTE.md:361`: **Status:** APPROVED
+- `docs/audits/sandbox/v1/PRE_B0_LEGACY_DYNAMICS_AUDIT.md` — title@`docs/audits/sandbox/v1/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:1`: # PRE-B0 LEGACY C++ DYNAMICS AUDIT
+  - meta@`docs/audits/sandbox/v1/PRE_B0_LEGACY_DYNAMICS_AUDIT.md:3`: **Audit Date:** 2026-01-03
+- `docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md` — title@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:1`: # PRE-B0 PYTHON CONTROL LAYER AUDIT (CORRECTED)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:3`: **Audit Date:** 2026-01-03
+  - meta@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:7`: **Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
+  - meta@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:218`: **Status:** NOT used for B0 system ID (prototype only)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:228`: | Module | File:Line | Purpose | State Contract | Status |
+  - meta@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:252`: | Module | File:Line | Purpose | Compatible State | Status |
+  - meta@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:560`: 1. **Status validation:**
+  - meta@`docs/audits/sandbox/v1/PRE_B0_PYTHON_CONTROL_AUDIT.md:601`: | **Status Checking** | Silent failure if status not checked | **High** | Check `result.success` |
+- `docs/audits/sandbox/v1/PRE_B0_RISKS_AND_MITIGATIONS.md` — title@`docs/audits/sandbox/v1/PRE_B0_RISKS_AND_MITIGATIONS.md:1`: # PRE-B0 RISKS AND MITIGATIONS (CORRECTED)
+  - meta@`docs/audits/sandbox/v1/PRE_B0_RISKS_AND_MITIGATIONS.md:3`: **Audit Date:** 2026-01-03
+  - meta@`docs/audits/sandbox/v1/PRE_B0_RISKS_AND_MITIGATIONS.md:7`: **Authority:** `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md`
+  - meta@`docs/audits/sandbox/v1/PRE_B0_RISKS_AND_MITIGATIONS.md:355`: # P0: Status checking
+  - meta@`docs/audits/sandbox/v1/PRE_B0_RISKS_AND_MITIGATIONS.md:440`: 1. **Status validation test:** Verify exception raised on BVP failure
+- `docs/autodiff_audits/CP1_1_to_CP1_3_report.md` — title@`docs/autodiff_audits/CP1_1_to_CP1_3_report.md:1`: # CRM Differentiable Simulator: Checkpoints CP1.1–CP1.3 Completion Report
+  - meta@`docs/autodiff_audits/CP1_1_to_CP1_3_report.md:122`: Status: 0 (0=success)
+  - meta@`docs/autodiff_audits/CP1_1_to_CP1_3_report.md:225`: Status: 0
+- `docs/autodiff_audits/CP1_4_AUDIT_report.md` — title@`docs/autodiff_audits/CP1_4_AUDIT_report.md:278`: # BAD (corruption risk):
+  - meta@`docs/autodiff_audits/CP1_4_AUDIT_report.md:3`: Date: 2025-12-30
+  - meta@`docs/autodiff_audits/CP1_4_AUDIT_report.md:392`: | Checklist Item           | Status        | Critical Issues                        |
+- `docs/autodiff_audits/CP1_4_report.md` — title@`docs/autodiff_audits/CP1_4_report.md:1`: # CP1.4 Completion Report: equilibrium_backward() — Implicit VJP
+  - meta@`docs/autodiff_audits/CP1_4_report.md:3`: **Date:** 2025-12-30
+  - meta@`docs/autodiff_audits/CP1_4_report.md:150`: Status: 0
+  - meta@`docs/autodiff_audits/CP1_4_report.md:180`: | Criterion | Status | Evidence |
+  - meta@`docs/autodiff_audits/CP1_4_report.md:208`: **Implementation Date:** 2025-12-30
+- `docs/autodiff_audits/CP1_5_report.md` — title@`docs/autodiff_audits/CP1_5_report.md:1`: # CP1.5 STATUS REPORT: FAIL
+  - meta@`docs/autodiff_audits/CP1_5_report.md:3`: **Status:** FAIL
+  - meta@`docs/autodiff_audits/CP1_5_report.md:4`: **Date:** 2025-12-30
+- `docs/autodiff_audits/CP1_6_to_CP1_8_report.md` — title@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:1`: # CP1.6 to CP1.8 Audit Report: Equilibrium Differentiability Validation
+  - meta@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:3`: **Date**: 2025-12-31
+  - meta@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:5`: **Status**: ✅ **ALL PASS** (CP1.6, CP1.7, CP1.8)
+  - meta@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:47`: | Operating Point | Max Abs Error | Max Rel Error | Status |
+  - meta@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:104`: | Operating Point | gradcheck Result | Status |
+  - meta@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:160`: **Status**: ✅ **PASS** - Replay mechanism functional
+  - meta@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:315`: ## Final Audit Status
+  - meta@`docs/autodiff_audits/CP1_6_to_CP1_8_report.md:317`: | Component | Status | Evidence |
+- `docs/autodiff_audits/CP2_2_COMPLETION.md` — title@`docs/autodiff_audits/CP2_2_COMPLETION.md:1`: # CP2.2 Completion Summary
+  - meta@`docs/autodiff_audits/CP2_2_COMPLETION.md:4`: **Status**: ✅ PASS
+  - meta@`docs/autodiff_audits/CP2_2_COMPLETION.md:5`: **Date**: 2025-12-31
+  - meta@`docs/autodiff_audits/CP2_2_COMPLETION.md:261`: ## Status for Next Checkpoint
+  - meta@`docs/autodiff_audits/CP2_2_COMPLETION.md:270`: **Completion Date**: 2025-12-31
+- `docs/autodiff_audits/CP2_2_report.md` — title@`docs/autodiff_audits/CP2_2_report.md:1`: # CP2.2 Dynamics Finite Difference Validation Report
+  - meta@`docs/autodiff_audits/CP2_2_report.md:3`: **Status: PASS (after fix)**
+  - meta@`docs/autodiff_audits/CP2_2_report.md:4`: **Date: 2025-12-31**
+  - meta@`docs/autodiff_audits/CP2_2_report.md:231`: **Report Status**: Documents initial failure, root cause analysis, and successful fix. CP2.2 now PASSES.
+- `docs/autodiff_audits/CP2_3_COMPLETION.md` — title@`docs/autodiff_audits/CP2_3_COMPLETION.md:1`: # CP2.3 Completion Summary
+  - meta@`docs/autodiff_audits/CP2_3_COMPLETION.md:4`: **Status**: ✅ PASS
+  - meta@`docs/autodiff_audits/CP2_3_COMPLETION.md:5`: **Date**: 2025-12-31
+  - meta@`docs/autodiff_audits/CP2_3_COMPLETION.md:269`: **Completion Date**: 2025-12-31
+- `docs/autodiff_audits/CP2_4_COMPLETION.md` — title@`docs/autodiff_audits/CP2_4_COMPLETION.md:1`: # CP2.4 Completion Summary
+  - meta@`docs/autodiff_audits/CP2_4_COMPLETION.md:4`: **Status**: ✅ PASS
+  - meta@`docs/autodiff_audits/CP2_4_COMPLETION.md:5`: **Date**: 2025-12-31
+  - meta@`docs/autodiff_audits/CP2_4_COMPLETION.md:394`: | Criterion | Status | Evidence |
+  - meta@`docs/autodiff_audits/CP2_4_COMPLETION.md:404`: **Completion Date**: 2025-12-31
+  - meta@`docs/autodiff_audits/CP2_4_COMPLETION.md:407`: **Status**: ✅ PRODUCTION READY
+- `docs/autodiff_audits/CP2_5_COMPLETION.md` — title@`docs/autodiff_audits/CP2_5_COMPLETION.md:1`: # CP2.5 Completion Report: Multi-step Rollout + Backprop Smoke Test
+  - meta@`docs/autodiff_audits/CP2_5_COMPLETION.md:3`: **Status:** ✅ **PASS**
+  - meta@`docs/autodiff_audits/CP2_5_COMPLETION.md:5`: **Date:** 2025-12-31
+  - meta@`docs/autodiff_audits/CP2_5_COMPLETION.md:382`: **CP2.5 Status:** ✅ **COMPLETE**
+- `docs/autodiff_audits/CP2_6_COMPLETION.md` — title@`docs/autodiff_audits/CP2_6_COMPLETION.md:1`: # CP2.6 Completion Report: CI Integration for CP2.x Dynamics Suite
+  - meta@`docs/autodiff_audits/CP2_6_COMPLETION.md:3`: **Status:** ✅ **PASS**
+  - meta@`docs/autodiff_audits/CP2_6_COMPLETION.md:5`: **Date:** 2025-12-31
+  - meta@`docs/autodiff_audits/CP2_6_COMPLETION.md:443`: **CP2.6 Status:** ✅ **COMPLETE**
+- `docs/autodiff_audits/CP2_FINAL_COMPLETION.md` — title@`docs/autodiff_audits/CP2_FINAL_COMPLETION.md:1`: # CP2 Final Completion Report: Differentiable Dynamics for Continuum Robot Control
+  - meta@`docs/autodiff_audits/CP2_FINAL_COMPLETION.md:4`: **Status**: ✅ **COMPLETE**
+  - meta@`docs/autodiff_audits/CP2_FINAL_COMPLETION.md:5`: **Date**: 2025-12-31
+  - meta@`docs/autodiff_audits/CP2_FINAL_COMPLETION.md:235`: - Status codes: `dynamics_forward` returns status=0 throughout
+  - meta@`docs/autodiff_audits/CP2_FINAL_COMPLETION.md:815`: **CP2 Status**: ✅ **COMPLETE AND VALIDATED**
+- `docs/autodiff_audits/LI_SWEEP_AUDIT.md` — title@`docs/autodiff_audits/LI_SWEEP_AUDIT.md:1`: # Li Sweep Regression Audit Report
+  - meta@`docs/autodiff_audits/LI_SWEEP_AUDIT.md:3`: **Date**: 2025-12-31
+  - meta@`docs/autodiff_audits/LI_SWEEP_AUDIT.md:5`: **Status**: ✅ **PASS** (both baseline and straight-rod modes)
+  - meta@`docs/autodiff_audits/LI_SWEEP_AUDIT.md:216`: **Status**: ✅ **PASS** - Python binding matches C++ exactly (within 1e-12)
+  - meta@`docs/autodiff_audits/LI_SWEEP_AUDIT.md:348`: ## 8. Audit Status
+  - meta@`docs/autodiff_audits/LI_SWEEP_AUDIT.md:350`: | Test | Status | Evidence |
+- `docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md` — title@`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:1`: # TRUE LEGACY HYBRID STATE CONTRACT
+  - meta@`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:3`: **Authority**: Extracted from `main` branch via worktree audit
+  - meta@`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:4`: **Date**: 2026-01-03
+  - meta@`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:5`: **Status**: FROZEN — Ground Truth
+  - meta@`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:131`: **Status**: Not strictly state (BVP can cold-start), but improves convergence.
+  - meta@`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:361`: **Status**: ✅ APPROVED
+  - meta@`docs/contracts/TRUE_LEGACY_HYBRID_STATE_CONTRACT.md:362`: **Audit Date**: 2026-01-03
+- `docs/control/CP3_1_COMPLETION.md` — title@`docs/control/CP3_1_COMPLETION.md:1`: # CP3.1 Linearization Validation — Completion Report
+  - meta@`docs/control/CP3_1_COMPLETION.md:3`: **Status**: ✅ **COMPLETE**
+  - meta@`docs/control/CP3_1_COMPLETION.md:4`: **Date**: 2025-12-31
+  - meta@`docs/control/CP3_1_COMPLETION.md:316`: | Criterion | Status | Evidence |
+  - meta@`docs/control/CP3_1_COMPLETION.md:382`: **CP3.1 Status**: ✅ **COMPLETE AND VALIDATED**
+- `docs/control/CP3_2_1_COMPLETION.md` — title@`docs/control/CP3_2_1_COMPLETION.md:1`: # CP3.2.1 Completion: iLQR Backward Pass Hotfix
+  - meta@`docs/control/CP3_2_1_COMPLETION.md:3`: **Status**: ✓ COMPLETE
+  - meta@`docs/control/CP3_2_1_COMPLETION.md:4`: **Date**: 2026-01-01
+  - meta@`docs/control/CP3_2_1_COMPLETION.md:225`: **Status**: ✓ PASS (no changes, verified compatibility)
+  - meta@`docs/control/CP3_2_1_COMPLETION.md:229`: **Status**: ✓ PASS (no changes, verified compatibility)
+  - meta@`docs/control/CP3_2_1_COMPLETION.md:501`: ## Integration Status
+  - meta@`docs/control/CP3_2_1_COMPLETION.md:527`: | Criterion | Status | Evidence |
+- `docs/control/CP3_2_COMPLETION.md` — title@`docs/control/CP3_2_COMPLETION.md:1`: # CP3.2 Completion Report: iLQR Trajectory Optimization
+  - meta@`docs/control/CP3_2_COMPLETION.md:3`: **Date:** 2025-12-31
+  - meta@`docs/control/CP3_2_COMPLETION.md:4`: **Status:** IMPLEMENTED - Foundation Complete
+  - meta@`docs/control/CP3_2_COMPLETION.md:495`: **Status:** ✅ CP3.2 COMPLETE
+- `docs/control/CP3_3_COMPLETION.md` — title@`docs/control/CP3_3_COMPLETION.md:1`: # CP3.3 Completion: Receding-Horizon MPC for Catheter Control
+  - meta@`docs/control/CP3_3_COMPLETION.md:3`: **Status**: ✓ COMPLETE
+  - meta@`docs/control/CP3_3_COMPLETION.md:4`: **Date**: 2026-01-01
+  - meta@`docs/control/CP3_3_COMPLETION.md:140`: ## Integration Status
+  - meta@`docs/control/CP3_3_COMPLETION.md:187`: | Criterion | Status | Evidence |
+- `docs/control/CP3_4_COMPLETION.md` — title@`docs/control/CP3_4_COMPLETION.md:1`: # CP3.4 Completion: CI Integration for Control Tests
+  - meta@`docs/control/CP3_4_COMPLETION.md:3`: **Status**: ✓ COMPLETE
+  - meta@`docs/control/CP3_4_COMPLETION.md:4`: **Date**: 2026-01-01
+  - meta@`docs/control/CP3_4_COMPLETION.md:480`: | Criterion | Status | Evidence |
+- `docs/control/CP3_5_1_NPZ_REPLAY_CONTRACT_COMPLETION.md` — title@`docs/control/CP3_5_1_NPZ_REPLAY_CONTRACT_COMPLETION.md:1`: # CP3.5.1: NPZ Replay Contract Fix & Validation
+  - meta@`docs/control/CP3_5_1_NPZ_REPLAY_CONTRACT_COMPLETION.md:3`: **Status**: ✅ Complete
+  - meta@`docs/control/CP3_5_1_NPZ_REPLAY_CONTRACT_COMPLETION.md:4`: **Date**: 2026-01-01
+- `docs/control/CP3_5_REPLAY_NPZ_COMPLETION.md` — title@`docs/control/CP3_5_REPLAY_NPZ_COMPLETION.md:1`: # CP3.5: Dataset-Driven NPZ Trajectory Replay Test
+  - meta@`docs/control/CP3_5_REPLAY_NPZ_COMPLETION.md:3`: **Status**: ✅ Complete
+  - meta@`docs/control/CP3_5_REPLAY_NPZ_COMPLETION.md:4`: **Date**: 2026-01-01
+- `docs/control/CP3_MPC_DESIGN.md` — title@`docs/control/CP3_MPC_DESIGN.md:1`: # CP3: Model-Based Control Design — iLQR / MPC Integration
+  - meta@`docs/control/CP3_MPC_DESIGN.md:3`: **Status**: DESIGN PHASE
+  - meta@`docs/control/CP3_MPC_DESIGN.md:4`: **Date**: 2025-12-31
+- `docs/design/CP2_0_DYNAMICS_PATCH.md` — title@`docs/design/CP2_0_DYNAMICS_PATCH.md:1`: # CP2.0 Design Patch: Fix Control Coupling & Remove Newton
+  - meta@`docs/design/CP2_0_DYNAMICS_PATCH.md:3`: **Date**: 2025-12-31
+  - meta@`docs/design/CP2_0_DYNAMICS_PATCH.md:4`: **Status**: Critical design fix before CP2.1 implementation
+  - meta@`docs/design/CP2_0_DYNAMICS_PATCH.md:560`: **Status**: Ready to apply to v1.1 design
+- `docs/design/CP2_0_PATCH_SUMMARY.md` — title@`docs/design/CP2_0_PATCH_SUMMARY.md:1`: # CP2.0 Patch Summary
+  - meta@`docs/design/CP2_0_PATCH_SUMMARY.md:3`: **Date**: 2025-12-31
+  - meta@`docs/design/CP2_0_PATCH_SUMMARY.md:4`: **Status**: ✓ Applied to CP2.1 implementation plan
+  - meta@`docs/design/CP2_0_PATCH_SUMMARY.md:252`: **Status**: Ready for CP2.1 implementation
+- `docs/design/CP2_1_IMPLEMENTATION_PLAN.md` — title@`docs/design/CP2_1_IMPLEMENTATION_PLAN.md:1`: # CP2.1 Implementation Plan: Core Dynamics Primitive
+  - meta@`docs/design/CP2_1_IMPLEMENTATION_PLAN.md:3`: **Status**: Ready for implementation (PATCHED)
+  - meta@`docs/design/CP2_1_IMPLEMENTATION_PLAN.md:4`: **Date**: 2025-12-31 (Updated with CP2.0 patch)
+- `docs/design/CP2_1_SUMMARY.md` — title@`docs/design/CP2_1_SUMMARY.md:1`: # CP2.1 Task Completion Summary
+  - meta@`docs/design/CP2_1_SUMMARY.md:3`: **Date**: 2025-12-31
+  - meta@`docs/design/CP2_1_SUMMARY.md:5`: **Status**: ✓ Design phase complete, ready for implementation
+- `docs/design/CP4_7_HYBRID_CONTROLLER_DESIGN.md` — title@`docs/design/CP4_7_HYBRID_CONTROLLER_DESIGN.md:1`: # CP4.7: Hybrid MPC + Learned Policy Controller — DESIGN DOCUMENT
+  - meta@`docs/design/CP4_7_HYBRID_CONTROLLER_DESIGN.md:3`: **Status**: DESIGN (awaiting approval)
+  - meta@`docs/design/CP4_7_HYBRID_CONTROLLER_DESIGN.md:4`: **Date**: 2026-01-02
+  - meta@`docs/design/CP4_7_HYBRID_CONTROLLER_DESIGN.md:439`: | Deliverable | Status |
+- `docs/design/DYNAMICS_V1_1_DESIGN.md` — title@`docs/design/DYNAMICS_V1_1_DESIGN.md:1`: # Design: Differentiable Dynamics Primitive (v1.1)
+  - meta@`docs/design/DYNAMICS_V1_1_DESIGN.md:823`: **Status**: Section 10 Resolved - Ready for CP2.1
+- `docs/migrations/ARCHIVE_REDUCED6D_9D.md` — title@`docs/migrations/ARCHIVE_REDUCED6D_9D.md:1`: # Reduced6D and 9D State Archive Documentation
+  - meta@`docs/migrations/ARCHIVE_REDUCED6D_9D.md:3`: **Date**: 2026-01-04
+  - meta@`docs/migrations/ARCHIVE_REDUCED6D_9D.md:14`: | Implementation | State Dim | Physics Solver | Status | Location |
+  - meta@`docs/migrations/ARCHIVE_REDUCED6D_9D.md:169`: **If ANY matches**: Migration incomplete (FAIL)
+  - meta@`docs/migrations/ARCHIVE_REDUCED6D_9D.md:228`: 3. **Clear Migration**: Force users to **intentionally** update to FULLSTATE dimensions
+- `docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md` — title@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:1`: # Migration Guide: MPC/iLQR to TRUE Legacy Dynamics
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:1`: # Migration Guide: MPC/iLQR to TRUE Legacy Dynamics
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:3`: **Date:** 2026-01-04
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:4`: **Status:** Infrastructure Complete - Controllers Need Implementation
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:12`: **Migration Status:**
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:26`: - **Status:** NON-LEGACY, moved to `python/control/reduced6d/`
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:32`: - **Status:** DEFAULT dynamics interface
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:291`: **Migration Date:** 2026-01-04
+  - meta@`docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md:292`: **Migration Status:** Partial (infrastructure complete, controllers pending)
+- `docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md` — title@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:1`: # FULLSTATE Default Migration - Completion Report
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:1`: # FULLSTATE Default Migration - Completion Report
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:3`: **Migration ID**: `true-legacy-dynamics-migration`
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:4`: **Date Completed**: 2026-01-04
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:12`: ✅ **Migration Status**: **COMPLETE**
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:122`: ### Phase D: Test Classification and Migration
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:143`: **No Migration Needed**: All active tests already use TRUE legacy or lower-level primitives.
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:169`: **Status**: PENDING (will run after doc commit)
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:273`: **User Migration Path**:
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:293`: **Status**: Not blocking migration (ensemble is separate subsystem).
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:311`: **Status**: Resolved - exclusions happen automatically via ctest registration.
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:336`: **Current Status**: Reduced6D kept as opt-in archive for legacy data replay.
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:340`: ## Migration Checklist
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:365`: **Migration Completed By**: Claude Code (Anthropic)
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:366`: **Date**: 2026-01-04
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_FULLSTATE.md:368`: **Review Status**: Pending zero-hit gates
+- `docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md` — title@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:1`: # TRUE Legacy Migration Completion Report
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:1`: # TRUE Legacy Migration Completion Report
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:3`: **Migration Date:** 2026-01-04
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:5`: **Status:** Phase A & B Complete, Phase C Pending
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:21`: ## Migration Summary
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:97`: **Status:** Infrastructure complete, full controller implementation deferred
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:115`: - Migration guide provides clear implementation roadmap
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:141`: - Migration summary
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:147`: ## Testing Status
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:151`: **Status:** Should still pass (not yet verified)
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:175`: ## Git Status
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:211`: - Migration guides in docs/migrations/
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:318`: - [x] Migration documentation complete
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:349`: **Migration Status:** PHASE A & B COMPLETE ✅
+  - meta@`docs/migrations/MIGRATION_COMPLETION_REPORT_TRUE_LEGACY.md:357`: **Date:** 2026-01-04
+- `docs/migrations/MIGRATION_FULLSTATE_DEFAULT.md` — title@`docs/migrations/MIGRATION_FULLSTATE_DEFAULT.md:1`: # FULLSTATE Default Migration Guide
+  - meta@`docs/migrations/MIGRATION_FULLSTATE_DEFAULT.md:1`: # FULLSTATE Default Migration Guide
+  - meta@`docs/migrations/MIGRATION_FULLSTATE_DEFAULT.md:3`: **Date**: 2026-01-04
+  - meta@`docs/migrations/MIGRATION_FULLSTATE_DEFAULT.md:42`: ## Migration Instructions
+- `docs/migrations/REDUCED6D_ARCHIVE_NOTE.md` — title@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:1`: # Reduced 6D Dynamics Archive Notice
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:3`: **Date Archived:** 2026-01-04
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:4`: **Status:** ARCHIVED (Non-Legacy)
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:85`: ## Migration Path
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:90`: **Migration guide:**
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:148`: - **Migration Guide:** `docs/migrations/MIGRATE_TO_TRUE_LEGACY_MPC_ILQR.md`
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:154`: **Archive Date:** 2026-01-04
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:155`: **Archived By:** Migration to TRUE Legacy Dynamics
+  - meta@`docs/migrations/REDUCED6D_ARCHIVE_NOTE.md:156`: **Status:** Preserved for historical reference and backward compatibility
+- `docs/reports/A3_5_BATCHED_VJP_REPORT.md` — title@`docs/reports/A3_5_BATCHED_VJP_REPORT.md:1`: # A3.5: Batched Implicit VJP for TRUE Legacy State
+  - meta@`docs/reports/A3_5_BATCHED_VJP_REPORT.md:3`: **Date**: 2026-01-03
+  - meta@`docs/reports/A3_5_BATCHED_VJP_REPORT.md:5`: **Status**: ✅ **COMPLETE** - Batched multi-RHS VJP with analytic J_yx
+  - meta@`docs/reports/A3_5_BATCHED_VJP_REPORT.md:347`: | Criterion | Status | Evidence |
+  - meta@`docs/reports/A3_5_BATCHED_VJP_REPORT.md:492`: **Date**: 2026-01-03
+- `docs/reports/A3_5_IMPLEMENTATION_SUMMARY.md` — title@`docs/reports/A3_5_IMPLEMENTATION_SUMMARY.md:1`: # A3.5 Implementation Summary
+  - meta@`docs/reports/A3_5_IMPLEMENTATION_SUMMARY.md:3`: **Date**: 2026-01-03
+  - meta@`docs/reports/A3_5_IMPLEMENTATION_SUMMARY.md:5`: **Status**: CORE REQUIREMENTS MET ✅
+  - meta@`docs/reports/A3_5_IMPLEMENTATION_SUMMARY.md:43`: **Status**: ✅ Working correctly
+  - meta@`docs/reports/A3_5_IMPLEMENTATION_SUMMARY.md:58`: **Status**: ⚠️ Implementation complete, correctness bug under investigation
+  - meta@`docs/reports/A3_5_IMPLEMENTATION_SUMMARY.md:64`: | Criterion | Status | Notes |
+- `docs/reports/A3_5_JYX_BATCHED_VJP_REPORT.md` — title@`docs/reports/A3_5_JYX_BATCHED_VJP_REPORT.md:1`: # A3.5: Analytic J_yx and Batched VJP Implementation Report
+  - meta@`docs/reports/A3_5_JYX_BATCHED_VJP_REPORT.md:3`: **Date**: 2026-01-03
+  - meta@`docs/reports/A3_5_JYX_BATCHED_VJP_REPORT.md:11`: **Status**: Core implementation complete with state gradient verification. Batched VJP has correctness issue under investigation.
+  - meta@`docs/reports/A3_5_JYX_BATCHED_VJP_REPORT.md:163`: **Status**: Known correctness issue under investigation. The batched implementation produces different results from looped calls, suggesting a bug in the batched backward pass logic.
+- `docs/reports/A3_5_VJP_BINDING_BUG_REPORT.md` — title@`docs/reports/A3_5_VJP_BINDING_BUG_REPORT.md:1`: # A3.5 VJP Binding Bug Report - RESOLVED
+  - meta@`docs/reports/A3_5_VJP_BINDING_BUG_REPORT.md:3`: **Date**: 2026-01-03
+  - meta@`docs/reports/A3_5_VJP_BINDING_BUG_REPORT.md:4`: **Status**: ✅ **FIXED** - Pybind11 array contiguity bug resolved
+- `docs/reports/CP2_1_IMPLEMENTATION_REPORT.md` — title@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:1`: # CP2.1 IMPLEMENTATION REPORT — Differentiable Dynamics v1.1
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:4`: **Date**: 2025-12-31
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:5`: **Status**: ✓ COMPLETE - ALL ACCEPTANCE GATES PASSED
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:21`: ### Acceptance Status
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:270`: Status: ✓ All positive
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:275`: Status: ✓ All positive
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:280`: Status: ✓ All positive
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:335`: **Status**: ✓ ALL TESTS PASS (no regressions)
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:408`: ## 9. Status and Next Steps
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:410`: ### CP2.1 Status: ✓ COMPLETE
+  - meta@`docs/reports/CP2_1_IMPLEMENTATION_REPORT.md:558`: **Status**: ✓ COMPLETE AND VERIFIED
+- `docs/reports/FULLSTATE_API_COMPLETION_REPORT.md` — title@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:1`: # FULLSTATE API Completion Report
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:3`: **Date:** 2026-01-04
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:4`: **Migration:** `true-legacy-dynamics-migration`
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:23`: **Status:** ✅ **EXISTS - VERIFIED**
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:56`: **Status:** ✅ **EXISTS - ANALYTIC - VERIFIED**
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:106`: **Status:** ⚠️ **FUNCTIONAL VIA PYTORCH AUTOGRAD** (No direct C++ analytic API)
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:164`: **Status:** ✅ **FULLSTATE ONLY - VERIFIED**
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:209`: **Status:** ✅ **FULLSTATE ONLY - VERIFIED**
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:232`: **Status:** ✅ **FULLSTATE ONLY - VERIFIED**
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:254`: **Status:** ✅ **FULLSTATE ONLY - VERIFIED**
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:277`: **Status:** ✅ **OLD APIs PROPERLY SEGREGATED**
+  - meta@`docs/reports/FULLSTATE_API_COMPLETION_REPORT.md:446`: - **Status:** FUNCTIONAL but slower than direct analytic implementation
+- `docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md` — title@`docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md:1`: # FULLSTATE Controllers Wiring Report
+  - meta@`docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md:3`: **Date:** 2026-01-04
+  - meta@`docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md:17`: ## 1. Controller Status Matrix
+  - meta@`docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md:19`: | Controller | File | State Dim | Jacobian Mode | Status |
+  - meta@`docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md:235`: | Component | Before | After | Status |
+  - meta@`docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md:243`: | Controller | Before | After | Status |
+  - meta@`docs/reports/FULLSTATE_CONTROLLERS_WIRING_REPORT.md:270`: **Status:** READY FOR PRODUCTION USE
+- `docs/reports/FULLSTATE_SANITY_GATES_REPORT.md` — title@`docs/reports/FULLSTATE_SANITY_GATES_REPORT.md:1`: # FULLSTATE Sanity Gates Report
+- `docs/reports/FULLSTATE_TEST_RUN_LOG.md` — title@`docs/reports/FULLSTATE_TEST_RUN_LOG.md:1`: # FULLSTATE Test Run Log
+  - meta@`docs/reports/FULLSTATE_TEST_RUN_LOG.md:3`: **Date:** 2026-01-04
+  - meta@`docs/reports/FULLSTATE_TEST_RUN_LOG.md:198`: **Overall Status:** ✅ **4/4 TESTS PASSED**
+  - meta@`docs/reports/FULLSTATE_TEST_RUN_LOG.md:247`: ### CMake Configuration Status:
+  - meta@`docs/reports/FULLSTATE_TEST_RUN_LOG.md:293`: **Test Status:** ✅ **ALL CRITICAL TESTS PASSED**
+  - meta@`docs/reports/FULLSTATE_TEST_RUN_LOG.md:307`: **Status:** READY FOR PRODUCTION USE
+- `docs/reports/FULLSTATE_VERIFICATION_REPORT.md` — title@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:1`: # FULLSTATE Verification Report
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:3`: **Date**: 2026-01-04
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:4`: **Migration**: Reduced6D (9D) → FULLSTATE (18N+15)
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:83`: - **Status**: PASSING
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:88`: - **Status**: PASSING (correctly detects numerical issues)
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:93`: - **Status**: PASSING
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:98`: - **Status**: EXPECTED BEHAVIOR (test correctly detects instability)
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:103`: - **Status**: EXPECTED BEHAVIOR
+  - meta@`docs/reports/FULLSTATE_VERIFICATION_REPORT.md:194`: **NONE REQUIRED** - Migration was already correct.
+- `docs/reports/FULLSTATE_VJP_LINEARIZE_IMPLEMENTATION_REPORT.md` — title@`docs/reports/FULLSTATE_VJP_LINEARIZE_IMPLEMENTATION_REPORT.md:1`: # FULLSTATE VJP and Linearization Implementation Report
+  - meta@`docs/reports/FULLSTATE_VJP_LINEARIZE_IMPLEMENTATION_REPORT.md:3`: **Date:** 2026-01-04
+  - meta@`docs/reports/FULLSTATE_VJP_LINEARIZE_IMPLEMENTATION_REPORT.md:247`: ### Build Status: ✅ PASS
+  - meta@`docs/reports/FULLSTATE_VJP_LINEARIZE_IMPLEMENTATION_REPORT.md:259`: ### Test Status: ✅ PASS
+  - meta@`docs/reports/FULLSTATE_VJP_LINEARIZE_IMPLEMENTATION_REPORT.md:283`: **Status:** READY FOR USE
+- `docs/reports/REGRESSION_PARITY_CRMDYN_TEST.md` — title@`docs/reports/REGRESSION_PARITY_CRMDYN_TEST.md:1`: # REGRESSION_PARITY_CRMDYN_TEST.md
+  - meta@`docs/reports/REGRESSION_PARITY_CRMDYN_TEST.md:3`: **Date**: 2026-01-03
+  - meta@`docs/reports/REGRESSION_PARITY_CRMDYN_TEST.md:5`: **Status**: Reference harness implemented and validated
+  - meta@`docs/reports/REGRESSION_PARITY_CRMDYN_TEST.md:525`: **Status:** Python wrapper now achieves exact parity with CRMDYN_test.cpp. The stride bug has been fixed and verified via regression testing.
+  - meta@`docs/reports/REGRESSION_PARITY_CRMDYN_TEST.md:532`: **Review Status:** Ready for technical review
+- `docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md` — title@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:1`: # TRUE LEGACY STEP ANALYTIC IMPLICIT VJP IMPLEMENTATION REPORT
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:3`: **Date**: 2026-01-03 (Post-Analytic Upgrade)
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:6`: **Status**: ✅ **OPERATIONAL** | ✅ **FULLY ANALYTIC - NO FINITE DIFFERENCES**
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:33`: ### Current Status
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:350`: | Criterion | Status | Evidence |
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:529`: **Date**: 2026-01-03 (Analytic Upgrade)
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:550`: **Date**: 2026-01-03
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:551`: **Status**: ✅ **OPERATIONAL** - Batched multi-RHS solve with analytic J_yx
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:660`: ### Acceptance Criteria Status
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:662`: | Criterion | Status | Evidence |
+  - meta@`docs/reports/TRUE_LEGACY_STEP_IMPLICIT_VJP_REPORT.md:699`: **Date**: 2026-01-03
+- `docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md` — title@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:1`: # TRUE LEGACY STEP WRAPPER EXECUTION REPORT
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:3`: **Date**: 2026-01-03
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:6`: **Status**: ✅ IMPLEMENTATION COMPLETE | ✅ ALL TESTS PASS (5/5)
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:21`: ### Current Status
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:39`: | File | Purpose | Lines | Status |
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:53`: | Component | Status |
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:307`: **Status**: ✅ SUCCESS (no errors, no warnings)
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:660`: | Criterion | Status | Evidence |
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:670`: **Overall Status**: ✅ **IMPLEMENTATION COMPLETE** | ✅ **ALL TESTS PASS**
+  - meta@`docs/reports/TRUE_LEGACY_STEP_WRAPPER_REPORT.md:700`: **Date**: 2026-01-03
+- `docs/technical_report.tex` — title@`docs/technical_report.tex:17`: \title{Hybrid Model-Based and Learned Control Using Differentiable Simulation and Uncertainty-Aware Policies for Continuum Robots}
+
+---
+# Appendix B — Full Test Index (purpose line + first API touch)
+
+## Current tests: `tests/` and `python/test/`
+- `tests/test_controller_smoke_fullstate.py` — purpose@`tests/test_controller_smoke_fullstate.py:2`; api=crm_diff_py (other) at `tests/test_controller_smoke_fullstate.py:12`
+- `tests/test_fullstate_linearize_shapes.py` — purpose@`tests/test_fullstate_linearize_shapes.py:2`; api=crm_diff_py (other) at `tests/test_fullstate_linearize_shapes.py:13`
+- `tests/test_fullstate_quick_smoke.py` — purpose@`tests/test_fullstate_quick_smoke.py:2`; api=crm_diff_py (other) at `tests/test_fullstate_quick_smoke.py:15`
+- `tests/test_fullstate_step_smoke.py` — purpose@`tests/test_fullstate_step_smoke.py:1`; api=crm_diff_py (other) at `tests/test_fullstate_step_smoke.py:23`
+- `tests/test_fullstate_vjp_gradcheck_u.py` — purpose@`tests/test_fullstate_vjp_gradcheck_u.py:2`; api=crm_diff_py.true_legacy_* at `tests/test_fullstate_vjp_gradcheck_u.py:66`
+- `tests/test_sanity_gate_no_reduced6d.py` — purpose@`tests/test_sanity_gate_no_reduced6d.py:2`; api=crm_diff_py.dynamics_* at `tests/test_sanity_gate_no_reduced6d.py:2`
+- `python/test/reduced6d/__init__.py` — purpose@`python/test/reduced6d/__init__.py:UNKNOWN`; api=none
+- `python/test/reduced6d/test_a1_legacy_state_adapter.py` — purpose@`python/test/reduced6d/test_a1_legacy_state_adapter.py:2`; api=none
+- `python/test/reduced6d/test_a1_step_legacy_contract_forward.py` — purpose@`python/test/reduced6d/test_a1_step_legacy_contract_forward.py:2`; api=none
+- `python/test/reduced6d/test_a2_implicit_vjp_gradcheck.py` — purpose@`python/test/reduced6d/test_a2_implicit_vjp_gradcheck.py:2`; api=none
+- `python/test/reduced6d/test_a3_batched_vjp.py` — purpose@`python/test/reduced6d/test_a3_batched_vjp.py:2`; api=none
+
+## Archived tests: `python/archive/test_*.py`
+- `python/archive/test_a35_batched_vjp.py` — purpose@`python/archive/test_a35_batched_vjp.py:2`; api=crm_diff_py.true_legacy_* at `python/archive/test_a35_batched_vjp.py:56`
+- `python/archive/test_a35_batched_vjp_lowlevel.py` — purpose@`python/archive/test_a35_batched_vjp_lowlevel.py:2`; api=crm_diff_py.true_legacy_* at `python/archive/test_a35_batched_vjp_lowlevel.py:71`
+- `python/archive/test_a35_debug_mismatch.py` — purpose@`python/archive/test_a35_debug_mismatch.py:2`; api=crm_diff_py.true_legacy_* at `python/archive/test_a35_debug_mismatch.py:71`
+- `python/archive/test_a35_grad_xf_fixed.py` — purpose@`python/archive/test_a35_grad_xf_fixed.py:1`; api=crm_diff_py.true_legacy_* at `python/archive/test_a35_grad_xf_fixed.py:49`
+- `python/archive/test_a35_manual_gradient_check.py` — purpose@`python/archive/test_a35_manual_gradient_check.py:2`; api=crm_diff_py.true_legacy_* at `python/archive/test_a35_manual_gradient_check.py:71`
+- `python/archive/test_a35_single_vs_batched.py` — purpose@`python/archive/test_a35_single_vs_batched.py:1`; api=crm_diff_py.true_legacy_* at `python/archive/test_a35_single_vs_batched.py:62`
+- `python/archive/test_a35_state_gradient_presence.py` — purpose@`python/archive/test_a35_state_gradient_presence.py:2`; api=none
+- `python/archive/test_bvp_adjoint_u_gradients.py` — purpose@`python/archive/test_bvp_adjoint_u_gradients.py:2`; api=none
+- `python/archive/test_compare_batch_single.py` — purpose@`python/archive/test_compare_batch_single.py:2`; api=crm_diff_py.true_legacy_* at `python/archive/test_compare_batch_single.py:41`
+- `python/archive/test_config.py` — purpose@`python/archive/test_config.py:2`; api=crm_diff_py (other) at `python/archive/test_config.py:6`
+- `python/archive/test_cp15.py` — purpose@`python/archive/test_cp15.py:2`; api=none
+- `python/archive/test_cp15_smoke.py` — purpose@`python/archive/test_cp15_smoke.py:2`; api=crm_diff_py.equilibrium_* at `python/archive/test_cp15_smoke.py:234`
+- `python/archive/test_cp16_finite_difference.py` — purpose@`python/archive/test_cp16_finite_difference.py:2`; api=crm_diff_py.equilibrium_* at `python/archive/test_cp16_finite_difference.py:40`
+- `python/archive/test_cp17_gradcheck.py` — purpose@`python/archive/test_cp17_gradcheck.py:2`; api=crm_diff_py (other) at `python/archive/test_cp17_gradcheck.py:22`
+- `python/archive/test_cp18_replay.py` — purpose@`python/archive/test_cp18_replay.py:2`; api=crm_diff_py.equilibrium_* at `python/archive/test_cp18_replay.py:60`
+- `python/archive/test_cp23_dynamics_smoke.py` — purpose@`python/archive/test_cp23_dynamics_smoke.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_cp23_dynamics_smoke.py:45`
+- `python/archive/test_cp24_dynamics_gradcheck.py` — purpose@`python/archive/test_cp24_dynamics_gradcheck.py:2`; api=crm_diff_py (other) at `python/archive/test_cp24_dynamics_gradcheck.py:20`
+- `python/archive/test_cp25_dynamics_rollout_smoke.py` — purpose@`python/archive/test_cp25_dynamics_rollout_smoke.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_cp25_dynamics_rollout_smoke.py:105`
+- `python/archive/test_cp31_linearization.py` — purpose@`python/archive/test_cp31_linearization.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_cp31_linearization.py:52`
+- `python/archive/test_cp32_ilqr_descent_regression.py` — purpose@`python/archive/test_cp32_ilqr_descent_regression.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_cp32_ilqr_descent_regression.py:58`
+- `python/archive/test_cp32_ilqr_fixed_target.py` — purpose@`python/archive/test_cp32_ilqr_fixed_target.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_cp32_ilqr_fixed_target.py:54`
+- `python/archive/test_cp33_mpc_tracking.py` — purpose@`python/archive/test_cp33_mpc_tracking.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_cp33_mpc_tracking.py:55`
+- `python/archive/test_cp35_npz_replay_contract.py` — purpose@`python/archive/test_cp35_npz_replay_contract.py:2`; api=crm_diff_py.equilibrium_* at `python/archive/test_cp35_npz_replay_contract.py:113`
+- `python/archive/test_cp35_replay_npz_tracking.py` — purpose@`python/archive/test_cp35_replay_npz_tracking.py:2`; api=none
+- `python/archive/test_cp35_replay_npz_tracking_OLD.py` — purpose@`python/archive/test_cp35_replay_npz_tracking_OLD.py:2`; api=crm_diff_py.equilibrium_* at `python/archive/test_cp35_replay_npz_tracking_OLD.py:87`
+- `python/archive/test_cp40_npz_metadata_audit.py` — purpose@`python/archive/test_cp40_npz_metadata_audit.py:1`; api=none
+- `python/archive/test_cp41_bc_multitraj.py` — purpose@`python/archive/test_cp41_bc_multitraj.py:1`; api=none
+- `python/archive/test_cp41_dataset_contract.py` — purpose@`python/archive/test_cp41_dataset_contract.py:1`; api=none
+- `python/archive/test_cp42_eval_smoke.py` — purpose@`python/archive/test_cp42_eval_smoke.py:1`; api=none
+- `python/archive/test_cp43_dagger_smoke.py` — purpose@`python/archive/test_cp43_dagger_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp43_dagger_smoke.py:21`
+- `python/archive/test_cp44_recurrent_smoke.py` — purpose@`python/archive/test_cp44_recurrent_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp44_recurrent_smoke.py:23`
+- `python/archive/test_cp44b_jacobian_benchmark.py` — purpose@`python/archive/test_cp44b_jacobian_benchmark.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp44b_jacobian_benchmark.py:65`
+- `python/archive/test_cp44b_jacobian_correctness.py` — purpose@`python/archive/test_cp44b_jacobian_correctness.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp44b_jacobian_correctness.py:74`
+- `python/archive/test_cp44c_batched_vjp_benchmark.py` — purpose@`python/archive/test_cp44c_batched_vjp_benchmark.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp44c_batched_vjp_benchmark.py:43`
+- `python/archive/test_cp44c_batched_vjp_correctness.py` — purpose@`python/archive/test_cp44c_batched_vjp_correctness.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp44c_batched_vjp_correctness.py:44`
+- `python/archive/test_cp45_ensemble_smoke.py` — purpose@`python/archive/test_cp45_ensemble_smoke.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp45_ensemble_smoke.py:144`
+- `python/archive/test_cp46_circle_has_reference.py` — purpose@`python/archive/test_cp46_circle_has_reference.py:1`; api=none
+- `python/archive/test_cp46_multitask_smoke.py` — purpose@`python/archive/test_cp46_multitask_smoke.py:1`; api=none
+- `python/archive/test_cp476_golden_health_gate_smoke.py` — purpose@`python/archive/test_cp476_golden_health_gate_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp476_golden_health_gate_smoke.py:21`
+- `python/archive/test_cp477_windowed_end_to_end_goldens.py` — purpose@`python/archive/test_cp477_windowed_end_to_end_goldens.py:1`; api=crm_diff_py (other) at `python/archive/test_cp477_windowed_end_to_end_goldens.py:28`
+- `python/archive/test_cp478_real_npz_health_smoke.py` — purpose@`python/archive/test_cp478_real_npz_health_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp478_real_npz_health_smoke.py:23`
+- `python/archive/test_cp479_golden_quality_benchmark.py` — purpose@`python/archive/test_cp479_golden_quality_benchmark.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp479_golden_quality_benchmark.py:101`
+- `python/archive/test_cp47_demo.py` — purpose@`python/archive/test_cp47_demo.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp47_demo.py:79`
+- `python/archive/test_cp47_health_gate_smoke.py` — purpose@`python/archive/test_cp47_health_gate_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp47_health_gate_smoke.py:24`
+- `python/archive/test_cp47_health_gate_window_smoke.py` — purpose@`python/archive/test_cp47_health_gate_window_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp47_health_gate_window_smoke.py:26`
+- `python/archive/test_cp47_hybrid_benchmark.py` — purpose@`python/archive/test_cp47_hybrid_benchmark.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp47_hybrid_benchmark.py:120`
+- `python/archive/test_cp47_hybrid_benchmark_trained.py` — purpose@`python/archive/test_cp47_hybrid_benchmark_trained.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp47_hybrid_benchmark_trained.py:102`
+- `python/archive/test_cp47_hybrid_end_to_end_cp472.py` — purpose@`python/archive/test_cp47_hybrid_end_to_end_cp472.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp47_hybrid_end_to_end_cp472.py:312`
+- `python/archive/test_cp47_hybrid_end_to_end_cp475.py` — purpose@`python/archive/test_cp47_hybrid_end_to_end_cp475.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp47_hybrid_end_to_end_cp475.py:78`
+- `python/archive/test_cp47_hybrid_smoke.py` — purpose@`python/archive/test_cp47_hybrid_smoke.py:1`; api=crm_diff_py.dynamics_* at `python/archive/test_cp47_hybrid_smoke.py:128`
+- `python/archive/test_cp47_windowed_end_to_end_smoke.py` — purpose@`python/archive/test_cp47_windowed_end_to_end_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp47_windowed_end_to_end_smoke.py:24`
+- `python/archive/test_cp51_real_window_training_smoke.py` — purpose@`python/archive/test_cp51_real_window_training_smoke.py:1`; api=crm_diff_py (other) at `python/archive/test_cp51_real_window_training_smoke.py:28`
+- `python/archive/test_debug.py` — purpose@`python/archive/test_debug.py:2`; api=crm_diff_py.equilibrium_* at `python/archive/test_debug.py:23`
+- `python/archive/test_debug_backward.py` — purpose@`python/archive/test_debug_backward.py:1`; api=crm_diff_py.equilibrium_* at `python/archive/test_debug_backward.py:33`
+- `python/archive/test_debug_binding.py` — purpose@`python/archive/test_debug_binding.py:1`; api=crm_diff_py.equilibrium_* at `python/archive/test_debug_binding.py:32`
+- `python/archive/test_hybrid_contract_roundtrip.py` — purpose@`python/archive/test_hybrid_contract_roundtrip.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_hybrid_contract_roundtrip.py:297`
+- `python/archive/test_hybrid_vjp_gradcheck.py` — purpose@`python/archive/test_hybrid_vjp_gradcheck.py:2`; api=crm_diff_py (other) at `python/archive/test_hybrid_vjp_gradcheck.py:24`
+- `python/archive/test_li_sweep_smoke.py` — purpose@`python/archive/test_li_sweep_smoke.py:2`; api=crm_diff_py.equilibrium_* at `python/archive/test_li_sweep_smoke.py:94`
+- `python/archive/test_manual_backward.py` — purpose@`python/archive/test_manual_backward.py:1`; api=crm_diff_py.equilibrium_* at `python/archive/test_manual_backward.py:33`
+- `python/archive/test_minimal_vjp.py` — purpose@`python/archive/test_minimal_vjp.py:2`; api=crm_diff_py.true_legacy_* at `python/archive/test_minimal_vjp.py:38`
+- `python/archive/test_p1_1_robustness_sweep.py` — purpose@`python/archive/test_p1_1_robustness_sweep.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_p1_1_robustness_sweep.py:99`
+- `python/archive/test_p1_2_lqr_warmstart.py` — purpose@`python/archive/test_p1_2_lqr_warmstart.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_p1_2_lqr_warmstart.py:47`
+- `python/archive/test_p1_3_terminal_hessian_improves_descent.py` — purpose@`python/archive/test_p1_3_terminal_hessian_improves_descent.py:2`; api=crm_diff_py.dynamics_* at `python/archive/test_p1_3_terminal_hessian_improves_descent.py:68`
+- `python/archive/test_p1_5_api_versioning.py` — purpose@`python/archive/test_p1_5_api_versioning.py:1`; api=crm_diff_py.equilibrium_* at `python/archive/test_p1_5_api_versioning.py:122`
+- `python/archive/test_regression_debug.py` — purpose@`python/archive/test_regression_debug.py:3`; api=crm_diff_py (other) at `python/archive/test_regression_debug.py:11`
+- `python/archive/test_regression_parity_crmdyn_test.py` — purpose@`python/archive/test_regression_parity_crmdyn_test.py:2`; api=crm_diff_py (other) at `python/archive/test_regression_parity_crmdyn_test.py:25`
+- `python/archive/test_true_legacy_state_adapter.py` — purpose@`python/archive/test_true_legacy_state_adapter.py:2`; api=none
+- `python/archive/test_true_legacy_step.py` — purpose@`python/archive/test_true_legacy_step.py:2`; api=none
+- `python/archive/test_true_legacy_step_vjp.py` — purpose@`python/archive/test_true_legacy_step_vjp.py:2`; api=none
+
+---
+# Appendix C — Archived C++ Test Programs (`python/archive/test_*.cpp`)
+
+- `python/archive/test_backward_bug.cpp` — main@`python/archive/test_backward_bug.cpp:9`
+- `python/archive/test_cp12.cpp` — main@`python/archive/test_cp12.cpp:7`
+- `python/archive/test_cp13.cpp` — main@`python/archive/test_cp13.cpp:8`
+- `python/archive/test_cp15_harness.cpp` — main@`python/archive/test_cp15_harness.cpp:63`
+- `python/archive/test_cp21_dynamics_smoke.cpp` — main@`python/archive/test_cp21_dynamics_smoke.cpp:10`
+- `python/archive/test_cp22_dynamics_fd.cpp` — main@`python/archive/test_cp22_dynamics_fd.cpp:234`
+- `python/archive/test_cp31_linearization.cpp` — main@`python/archive/test_cp31_linearization.cpp:163`
+- `python/archive/test_golden_backward.cpp` — main@`python/archive/test_golden_backward.cpp:31`
+- `python/archive/test_li_sweep.cpp` — main@`python/archive/test_li_sweep.cpp:213`
+- `python/archive/test_physics_audit.cpp` — main@`python/archive/test_physics_audit.cpp:45`
+- `python/archive/test_straight_rod.cpp` — main@`python/archive/test_straight_rod.cpp:15`

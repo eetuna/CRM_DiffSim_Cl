@@ -15,6 +15,7 @@ BVP unknowns are algebraic, NOT part of core state unless explicitly stored.
 """
 
 import torch
+import numpy as np
 
 # Constants
 COIL_STATE_DIM = 18  # v[3], w[3], p[3], R[9]
@@ -69,21 +70,26 @@ def pack_true_legacy_state(
         ValueError: If input shapes are invalid or inconsistent
     """
     # Validate inputs
-    if x_coil.dim() not in [2, 3]:
+    # Handle both torch and numpy
+    is_torch = isinstance(x_coil, torch.Tensor)
+    x_coil_ndim = x_coil.ndim if is_torch else x_coil.ndim
+    xf_ndim = xf.ndim if isinstance(xf, torch.Tensor) else xf.ndim
+
+    if x_coil_ndim not in [2, 3]:
         raise ValueError(
             f"x_coil must be 2D [N, 18] or 3D [B, N, 18], got shape {x_coil.shape}"
         )
-    if xf.dim() not in [1, 2]:
+    if xf_ndim not in [1, 2]:
         raise ValueError(
             f"xf must be 1D [15] or 2D [B, 15], got shape {xf.shape}"
         )
 
     # Check if batched
-    is_batched = (x_coil.dim() == 3)
+    is_batched = (x_coil_ndim == 3)
 
     if is_batched:
         # Batched case: x_coil [B, N, 18], xf [B, 15]
-        if xf.dim() != 2:
+        if xf_ndim != 2:
             raise ValueError(
                 f"Batched x_coil requires batched xf, got x_coil shape {x_coil.shape}, xf shape {xf.shape}"
             )
@@ -107,11 +113,14 @@ def pack_true_legacy_state(
         x_coil_flat = x_coil.reshape(batch_size, -1)
 
         # Concatenate: [B, N*18 + 15]
-        packed = torch.cat([x_coil_flat, xf], dim=1)
+        if is_torch:
+            packed = torch.cat([x_coil_flat, xf], dim=1)
+        else:  # numpy
+            packed = np.concatenate([x_coil_flat, xf], axis=1)
 
     else:
         # Unbatched case: x_coil [N, 18], xf [15]
-        if xf.dim() != 1:
+        if xf_ndim != 1:
             raise ValueError(
                 f"Unbatched x_coil requires unbatched xf, got x_coil shape {x_coil.shape}, xf shape {xf.shape}"
             )
@@ -130,9 +139,16 @@ def pack_true_legacy_state(
         x_coil_flat = x_coil.reshape(-1)
 
         # Concatenate: [N*18 + 15]
-        packed = torch.cat([x_coil_flat, xf], dim=0)
+        if is_torch:
+            packed = torch.cat([x_coil_flat, xf], dim=0)
+        else:  # numpy
+            packed = np.concatenate([x_coil_flat, xf], axis=0)
 
-    return packed.contiguous()
+    # Return contiguous if torch, otherwise just return (numpy is always contiguous after concat)
+    if hasattr(packed, 'contiguous'):
+        return packed.contiguous()
+    else:
+        return packed
 
 
 def unpack_true_legacy_state(
@@ -155,13 +171,14 @@ def unpack_true_legacy_state(
         ValueError: If input shape is invalid for the given n_act
     """
     expected_dim = true_legacy_state_dim(n_act)
+    x_ndim = x.ndim
 
-    if x.dim() not in [1, 2]:
+    if x_ndim not in [1, 2]:
         raise ValueError(
             f"x must be 1D [state_dim] or 2D [B, state_dim], got shape {x.shape}"
         )
 
-    is_batched = (x.dim() == 2)
+    is_batched = (x_ndim == 2)
 
     if is_batched:
         # Batched case: x [B, 18·N + 15]

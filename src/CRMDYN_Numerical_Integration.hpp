@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CRM_MatrixOperations_Templates.hpp"
+
 //
 //
 //	NUMERICAL INTEGRATION FUNCTIONS for IVP SOLVER
@@ -8,7 +10,7 @@
 
 namespace CRMCatheterModel {
 
-    void CRMIntegrand_dyn(double s, const StateVector& in_x, const CRMIntegrandParams in_Params, const double in_nL[3],
+    inline void CRMIntegrand_dyn(double s, const StateVector& in_x, const CRMIntegrandParams in_Params, const double in_nL[3],
                       StateDerivativeVector& out_xdot) {
 
         double Length;
@@ -106,6 +108,86 @@ namespace CRMCatheterModel {
         //xdot(13:15) = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l); % udot
         //  note: the sample code has matlab indexing starting from 1 to 15
 
+    }
+
+    // Templated version for forward-mode AD with Dual numbers
+    template<typename T>
+    void CRMIntegrand_dyn_T(double s, const StateVector_T<T>& in_x, const CRMIntegrandParams in_Params, const T in_nL[3],
+                      StateDerivativeVector_T<T>& out_xdot) {
+
+        double Length;
+        double deltalambdainv;
+        T fcum[3];
+        double ustardot[3];  //  We are assuming Kdot=0.0 (K=const)
+
+        // copy inputs and parameters to local variables
+        Length = in_Params.Li;
+        deltalambdainv = in_Params.dlambdainv;
+        auto& K = in_Params.K;
+        auto& Kinv = in_Params.Kinv;
+        auto& ustar = in_Params.ustar;
+        auto& l = in_Params.l;
+        for (int i = 0; i < 3; i++) {
+            ustardot[i] = 0.0; // we assume ustardot=0.0 since our rest shape model is piecewise constant curvature
+        }
+
+        // for simplicity, create aliases
+        auto& u = in_x._u;
+        auto& R = in_x._R;  // R stays double (not differentiated)
+        auto& udot = out_xdot._u;
+
+        // calculate interpolated value of fcum
+        double lambda = Length - s;
+        double ix = lambda * deltalambdainv;
+        double ird_f = floor(ix);
+        if (ird_f < 0) ird_f = 0;
+        int ird = (int)ird_f;
+        double iru_f = ceil(ix);
+        if (iru_f > in_Params.no_fcum_steps) iru_f = in_Params.no_fcum_steps;
+        int iru = (int)iru_f;
+        double ixmird = ix - ird;
+        double irumix = iru - ix;
+        for (int i = 0; i < 3; i++) {
+            fcum[i] = T(in_Params.fcumlambda[iru][i] * ixmird + in_Params.fcumlambda[ird][i] * irumix);
+        }
+
+        // add the tip force to fcum
+        for (int i = 0; i < 3; i++) {
+            fcum[i] += T(in_Params.ftip[i]);
+        }
+
+        T nL_spatial[3];
+        mMult_AB_T<T, 3, 3, 1>(R, in_nL, nL_spatial);
+        // add nL_spatial to fcum
+        for (int i = 0; i < 3; i++) {
+            fcum[i] += nL_spatial[i];
+        }
+
+        // calculate u_hat
+        T u_hat[9];
+        wHat_T(u, u_hat);
+
+        // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l); % udot
+        //
+        //   e3hat*R' = [ -r12 -r22 -r32; r11 r21 r31; 0 0 0];
+        double e3hatRT[9];
+        e3hatRT[0] = -R[1];   e3hatRT[1] = -R[4];   e3hatRT[2] = -R[7];
+        e3hatRT[3] = R[0];    e3hatRT[4] = R[3];    e3hatRT[5] = R[6];
+        e3hatRT[6] = 0.0;     e3hatRT[7] = 0.0;     e3hatRT[8] = 0.0;
+        T e3hatRTfcum[3];
+        mMult_AB_T<T, 3, 3, 1>(e3hatRT, fcum, e3hatRTfcum);  // e3m*R'*intf
+        T RTl[3];
+        mMult_ATB_T<T, 3, 3, 1>(R, l, RTl);  // R'*l
+        T umustar[3];
+        mSub_AB_T<T, 3, 1>(u, ustar, umustar);  // (u-ustar_s)
+        T Kumustar[3], uhatKumustar[3];
+        mMult_AB_T<T, 3, 3, 1>(K, umustar, Kumustar);
+        mMult_AB_T<T, 3, 3, 1>(u_hat, Kumustar, uhatKumustar);  //(um*K+Kdot)*(u-ustar_s) assuming Kdot=0
+        T sumterm[3];
+        mAdd_ABC_T<T, 3, 1>(uhatKumustar, e3hatRTfcum, RTl, sumterm);  // ((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
+        T KinvSum[3];
+        mMult_AB_T<T, 3, 3, 1>(Kinv, sumterm, KinvSum);  // Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
+        mSub_AB_T<T, 3, 1>(ustardot, KinvSum, udot);  // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l);
     }
 
 

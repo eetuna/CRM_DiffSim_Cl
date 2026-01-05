@@ -1,7 +1,7 @@
 """
-CP3.3: Receding-Horizon Model Predictive Control (MPC) for Catheter Control
+FULLSTATE Receding-Horizon Model Predictive Control (MPC) for Catheter Control
 
-Implements MPC using warm-started iLQR as the underlying optimizer.
+Implements MPC using warm-started iLQR with TRUE legacy dynamics (18·N+15).
 At each timestep:
 1. Solve finite-horizon optimal control problem using iLQR
 2. Apply first control input
@@ -16,11 +16,14 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'build'))
 import crm_diff_py
 from control.ilqr import iLQRSolver
+from control.true_legacy_state_adapter import (
+    pack_true_legacy_state, unpack_true_legacy_state, true_legacy_state_dim
+)
 
 
 class MPCController:
     """
-    Model Predictive Control using warm-started iLQR.
+    Model Predictive Control using warm-started iLQR with FULLSTATE dynamics.
 
     At each timestep:
     - Solve optimal control over horizon T
@@ -30,7 +33,7 @@ class MPCController:
     """
 
     def __init__(self, dt, L_inserted, params_dict, horizon=10,
-                 Q_tip=1.0, R=None, max_ilqr_iters=3,
+                 n_act=1, Q_tip=1.0, R=None, max_ilqr_iters=3,
                  cost_decrease_tol=1e-2, verbose=False):
         """
         Args:
@@ -38,8 +41,9 @@ class MPCController:
             L_inserted: float, insertion length (mm)
             params_dict: dict, catheter parameters
             horizon: int, MPC planning horizon (default: 10)
+            n_act: int, number of actuator sets (default: 1)
             Q_tip: float, weight on tip position tracking error (default: 1.0)
-            R: np.array (3, 3), control cost matrix (default: 0.01 * I)
+            R: np.array (3*n_act, 3*n_act), control cost matrix (default: 0.01 * I)
             max_ilqr_iters: int, max iLQR iterations per MPC step (default: 3)
             cost_decrease_tol: float, early exit if cost decrease < tol (default: 1e-2)
             verbose: bool, print debug info
@@ -48,8 +52,13 @@ class MPCController:
         self.L_inserted = L_inserted
         self.params_dict = params_dict
         self.horizon = horizon
+        self.n_act = n_act
         self.Q_tip = Q_tip
-        self.R = R if R is not None else 0.01 * np.eye(3)
+
+        self.state_dim = true_legacy_state_dim(n_act)  # 18*n_act + 15
+        self.control_dim = 3 * n_act
+
+        self.R = R if R is not None else 0.01 * np.eye(self.control_dim)
         self.max_ilqr_iters = max_ilqr_iters
         self.cost_decrease_tol = cost_decrease_tol
         self.verbose = verbose
@@ -79,11 +88,11 @@ class MPCController:
         Compute MPC control at current timestep.
 
         Args:
-            x_current: np.array (6,), current state
+            x_current: np.array (state_dim,), current state
             t_current: float, current time (seconds)
 
         Returns:
-            u_mpc: np.array (3,), control to apply
+            u_mpc: np.array (control_dim,), control to apply
             info: dict, diagnostic information
         """
         # Get target position at end of horizon for look-ahead tracking
@@ -91,22 +100,22 @@ class MPCController:
         p_target = self.p_target_fn(t_horizon)
 
         # Cost matrices
-        Q = np.zeros((6, 6))  # No direct state cost
+        Q = np.zeros((self.state_dim, self.state_dim))  # No direct state cost
         R = self.R
 
         # Create iLQR solver for this MPC step
-        # Use terminal weight to penalize tip error at horizon end
         solver = iLQRSolver(
             dt=self.dt,
             L_inserted=self.L_inserted,
             params_dict=self.params_dict,
             horizon=self.horizon,
+            n_act=self.n_act,
             Q=Q,
             R=R,
             p_target=p_target,
             terminal_weight=self.Q_tip,
             max_iters=self.max_ilqr_iters,
-            tol=1e-2,  # Not critical since we limit iterations
+            tol=1e-2,
             reg_init=1e-3,
             reg_scale=10.0,
             line_search_alphas=[1.0, 0.5, 0.25, 0.1]
@@ -114,16 +123,16 @@ class MPCController:
 
         # Warm-start: shift previous solution
         if self.U_prev is None:
-            # Cold start with small random perturbation to break symmetry
-            np.random.seed(42)  # Reproducible
-            U_init = np.random.randn(self.horizon, 3) * 0.02
+            # Cold start with small random perturbation
+            np.random.seed(42)
+            U_init = np.random.randn(self.horizon, self.control_dim) * 0.02
         else:
             # Shift previous solution and append last control
-            U_init = np.zeros((self.horizon, 3))
+            U_init = np.zeros((self.horizon, self.control_dim))
             U_init[:-1] = self.U_prev[1:]  # Shift left
             U_init[-1] = self.U_prev[-1]    # Repeat last control
 
-        # Solve iLQR with early termination
+        # Solve iLQR
         X_opt, U_opt, converged = solver.solve(
             x_current,
             U_init=U_init,
@@ -160,15 +169,15 @@ def simulate_mpc_tracking(controller, x0, t_start, t_end, dt):
 
     Args:
         controller: MPCController instance
-        x0: np.array (6,), initial state
+        x0: np.array (state_dim,), initial state
         t_start: float, start time (seconds)
         t_end: float, end time (seconds)
         dt: float, simulation timestep
 
     Returns:
         t_history: np.array (N,), time history
-        x_history: np.array (N, 6), state history
-        u_history: np.array (N, 3), control history
+        x_history: np.array (N, state_dim), state history
+        u_history: np.array (N, control_dim), control history
         p_tip_history: np.array (N, 3), tip position history
         p_target_history: np.array (N, 3), target position history
         info_history: list of dicts, diagnostic info per timestep
@@ -180,8 +189,8 @@ def simulate_mpc_tracking(controller, x0, t_start, t_end, dt):
     num_steps = int((t_end - t_start) / dt)
 
     t_history = np.zeros(num_steps + 1)
-    x_history = np.zeros((num_steps + 1, 6))
-    u_history = np.zeros((num_steps, 3))
+    x_history = np.zeros((num_steps + 1, controller.state_dim))
+    u_history = np.zeros((num_steps, controller.control_dim))
     p_tip_history = np.zeros((num_steps + 1, 3))
     p_target_history = np.zeros((num_steps + 1, 3))
     info_history = []
@@ -194,13 +203,8 @@ def simulate_mpc_tracking(controller, x0, t_start, t_end, dt):
     x_history[0] = x_current
 
     # Get initial tip position
-    result = crm_diff_py.dynamics_forward(
-        x_current, np.zeros(3), 0.0,
-        controller.L_inserted, controller.params_dict
-    )
-    if result['status'] != 0:
-        raise RuntimeError(f"Initial tip computation failed: status={result['status']}")
-    p_tip_history[0] = result['p_tip']
+    x_coil_0, xf_0 = unpack_true_legacy_state(x_current, controller.n_act)
+    p_tip_history[0] = xf_0[:3]
     p_target_history[0] = controller.p_target_fn(t_current)
 
     # Closed-loop simulation
@@ -215,21 +219,21 @@ def simulate_mpc_tracking(controller, x0, t_start, t_end, dt):
         info_history.append(info)
 
         # Apply control and step dynamics
-        result = crm_diff_py.dynamics_forward(
-            x_current, u_mpc, dt,
-            controller.L_inserted, controller.params_dict
+        x_coil_t, xf_t = unpack_true_legacy_state(x_current, controller.n_act)
+        result = crm_diff_py.true_legacy_step_forward(
+            x_coil_t, xf_t, u_mpc, dt, controller.params_dict
         )
-        if result['status'] != 0:
-            raise RuntimeError(f"Dynamics step failed at t={t_current}: status={result['status']}")
+        if not result['converged']:
+            raise RuntimeError(f"Dynamics step failed at t={t_current}: converged={result['converged']}")
 
         # Update state
-        x_current = result['x_next']
+        x_current = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])
         t_current = t_start + (step + 1) * dt
 
         # Record
         t_history[step + 1] = t_current
         x_history[step + 1] = x_current
-        p_tip_history[step + 1] = result['p_tip']
+        p_tip_history[step + 1] = result['xf_next'][:3]
         p_target_history[step + 1] = controller.p_target_fn(t_current)
 
     return (t_history, x_history, u_history, p_tip_history,

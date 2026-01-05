@@ -454,6 +454,7 @@ namespace CRMCatheterModel {
 		for (size_t ix = 0; ix < no_act_set; ix++) for (size_t jx = 0; jx < 2; jx++) CoilAlignmentAngles[ix][jx] = t.CoilAlignmentAngles[ix][jx];
 		for (size_t ix = 0; ix < no_act_set; ix++) for (size_t jx = 0; jx < 9; jx++) CoilTurnAreaMat[ix][jx] = t.CoilTurnAreaMat[ix][jx];
 		for (size_t ix = 0; ix < no_act_set; ix++) ActMass[ix] = t.ActMass[ix];
+		for (size_t ix = 0; ix < no_act_set; ix++) for (size_t jx = 0; jx < 6; jx++) ActDamping[ix][jx] = t.ActDamping[ix][jx];
 		for (size_t ix = 0; ix < no_locmarkers; ix++) LocMarkers[ix] = t.LocMarkers[ix];
 
 	}
@@ -472,6 +473,7 @@ namespace CRMCatheterModel {
 			delete[] CoilTurnAreaMat;
 			delete[] rho;
 			delete[] ActMass;
+			delete[] ActDamping;
 		}
 	}
 
@@ -488,6 +490,7 @@ namespace CRMCatheterModel {
 		CoilAlignmentAngles = new double[no_act_set][2];
 		CoilTurnAreaMat = new double[no_act_set][9];
 		ActMass = new double[no_act_set];
+		ActDamping = new double[no_act_set][6];
 		LocMarkers = new double[no_locmarkers];
 
 		memory_allocated = true;

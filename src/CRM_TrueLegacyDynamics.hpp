@@ -81,6 +81,20 @@ int true_legacy_step_backward_batched(
     double* rel_residual = nullptr           // Optional: solve residual
 );
 
+// Linearization: Compute A, B matrices using implicit function theorem
+// A = ∂x_next/∂x (state Jacobian), B = ∂x_next/∂u (control Jacobian)
+// Uses formulas: A = G_x - G_y * (R_y^{-1} * R_x), B = G_u - G_y * (R_y^{-1} * R_u)
+// Returns: 0=success, non-zero=failure
+int true_legacy_linearize_implicit(
+    const TrueLegacyStepResult& fwd_result,  // Cached forward result
+    const CRMForwardKinematicsData& params,  // Catheter parameters
+    double L_inserted,                       // Insertion length (mm)
+    Eigen::MatrixXd& A_out,                  // Output: [state_dim × state_dim]
+    Eigen::MatrixXd& B_out,                  // Output: [state_dim × control_dim]
+    int* qr_rank = nullptr,                  // Optional: rank from linear solve
+    double* rel_residual = nullptr           // Optional: solve residual
+);
+
 } // namespace CRMCatheterModel
 
 #endif // CRM_TRUE_LEGACY_DYNAMICS_HPP

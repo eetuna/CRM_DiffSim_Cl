@@ -28,6 +28,7 @@ namespace CRMCatheterModel {
 	template<> struct StDerivativeVect_trait<StateVector> { typedef StateDerivativeVector type; };
 	template<> struct StDerivativeVect_trait<AugmentedStateVector<IVPJacobiansMini>> { typedef AugmentedStateDerivativeVector<IVPJacobiansMini> type; };
 	template<> struct StDerivativeVect_trait<AugmentedStateVector<IVPJacobiansFull>> { typedef AugmentedStateDerivativeVector<IVPJacobiansFull> type; };
+	template<typename T> struct StDerivativeVect_trait<StateVector_T<T>> { typedef StateDerivativeVector_T<T> type; };
 	template<typename T> using StDerivativeVectType = typename StDerivativeVect_trait<T>::type;
 
 	// helper to be able to match state vector types

@@ -1,5 +1,8 @@
 #include "CRM_BVPJacobian.hpp"
 #include "CRM_MatrixOperations.hpp"
+#include "CRM_MatrixOperations_Templates.hpp"
+#include "CoilDynamics_Defs_Templates.hpp"
+#include "CoilDynamics_Defs_Templates2.hpp"
 #include "CRM_IVPJacobian.hpp"
 #include <cstring>
 
@@ -124,15 +127,31 @@ void compute_bvp_jacobians_fmad(
         }
     }
 
+    // Construct actuator inertia using hollow cylinder formula (MUST match forward path exactly)
+    // Units: kg * mm^2 (mass in kg, radii and lengths in mm)
     double ActInertia[NUM_ACT_SET][9];
     for (int j = 0; j < NUM_ACT_SET; ++j) {
-        for (int i = 0; i < 9; ++i) {
-            ActInertia[j][i] = (i % 4 == 0) ? params.CathParams->ActMass[j] * 1e-6 : 0.0;
-        }
+        double mass = params.CathParams->ActMass[j];
+        double r_outer = params.CathParams->OuterRadius[0];  // Use first flexible segment radii
+        double r_inner = params.CathParams->InnerRadius[0];
+        double seg_length = params.CathParams->SegLengths[2*j + 1];  // Actuator segment length
+
+        double r_sum_sq = r_outer * r_outer + r_inner * r_inner;
+        double I_zz = 0.5 * mass * r_sum_sq;  // Moment about cylinder axis
+        double I_xx = 0.25 * mass * r_sum_sq + (1.0/12.0) * mass * seg_length * seg_length;  // Perpendicular
+
+        ActInertia[j][0] = I_xx;  ActInertia[j][1] = 0.0;   ActInertia[j][2] = 0.0;
+        ActInertia[j][3] = 0.0;   ActInertia[j][4] = I_xx;  ActInertia[j][5] = 0.0;
+        ActInertia[j][6] = 0.0;   ActInertia[j][7] = 0.0;   ActInertia[j][8] = I_zz;
     }
 
+    // Load damping coefficients from catheter parameters (MUST match forward path)
     double damping[NUM_ACT_SET][6];
-    std::memset(damping, 0, sizeof(damping));
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 6; ++i) {
+            damping[j][i] = params.CathParams->ActDamping[j][i];
+        }
+    }
 
     // Construct shooting params
     CRMShootingMethodParams shooting_params = CRMDYNConstructShootingMethodParamSet(
@@ -215,50 +234,179 @@ void compute_bvp_jacobians_fmad(
     // For the converged solution, the dominant term is the direct dependence.
     // We use forward-mode AD to capture this structure with Dual numbers.
 
-    // Compute J_yy using analytic structure (principal diagonal dominates)
-    J_yy.setIdentity();  // Start with -I (direct dependence)
-    J_yy *= -1.0;
-
-    // The off-diagonal terms come from IVP coupling (mL affects integrated state, which affects n_computed)
-    // For the converged solution, these are second-order corrections.
-    // We use the structure that moment and force residuals are primarily self-coupled.
+    // Compute J_yy = ∂r/∂y where y = [mL; nL] using forward-mode AD (NO FD)
+    // CRITICAL: Must capture mL↔nL coupling for correct implicit gradients
     //
-    // This gives us a well-conditioned Jacobian that captures the physics:
-    // - Diagonal blocks: direct boundary dependence
-    // - Off-diagonal: IVP propagation (small for converged solution)
+    // Sprint S12: Use DYNNLEquation_YY_T with Dual numbers to compute exact J_yy
+    // by seeding each component of y = [mL; nL] with derivative = 1
+    J_yy.resize(dim_y, dim_y);
+    J_yy.setZero();
 
-    // Compute J_yu analytically (NO finite differences)
-    // u affects residual through magnetic torques: τ_mag = μ × B where μ ∝ u
-    J_yu.setZero();
+    // Pack base mL and nL into input format (values only, no derivatives yet)
+    double in_x_base[NUM_ACT_SET * 6];
+    for (int j_pack = 0; j_pack < NUM_ACT_SET; ++j_pack) {
+        for (int i_pack = 0; i_pack < 3; ++i_pack) {
+            in_x_base[i_pack + j_pack*6] = mL[j_pack][i_pack];
+            in_x_base[i_pack + j_pack*6 + 3] = nL[j_pack][i_pack];
+        }
+    }
 
+    // Compute base MagMoment for each actuator (stays double, no derivatives)
+    double MagMoment[NUM_ACT_SET][3];
+    for (int j_mag = 0; j_mag < NUM_ACT_SET; ++j_mag) {
+        for (int i_mag = 0; i_mag < 3; ++i_mag) {
+            MagMoment[j_mag][i_mag] = shooting_params.MagMoment[j_mag][i_mag];
+        }
+    }
+
+    // Compute muhat from MagMoment (for value path, derivatives handled separately)
+    double muhat_double[NUM_ACT_SET][9];
     for (int j = 0; j < NUM_ACT_SET; ++j) {
-        const double* B = shooting_params.B0;
-        const double* M = shooting_params.MagMoment[j];
+        wHat(MagMoment[j], muhat_double[j]);
+    }
 
-        for (int i = 0; i < 3; ++i) {
-            // ∂τ_mag/∂u[i] = M[i] * (e_i × B)
-            double dtau_du[3];
-            if (i == 0) {
-                dtau_du[0] = 0.0;
-                dtau_du[1] = -M[0] * B[2];
-                dtau_du[2] = M[0] * B[1];
-            } else if (i == 1) {
-                dtau_du[0] = M[1] * B[2];
-                dtau_du[1] = 0.0;
-                dtau_du[2] = -M[1] * B[0];
-            } else {
-                dtau_du[0] = -M[2] * B[1];
-                dtau_du[1] = M[2] * B[0];
-                dtau_du[2] = 0.0;
-            }
+    // Compute J_yy using forward-mode AD with Dual numbers
+    // For each column j_y, seed y[j_y] with derivative = 1 and extract ∂r/∂y[j_y]
+    for (int j_y = 0; j_y < dim_y; ++j_y) {
+        // Create Dual-seeded input: in_x[i] = Dual(value, deriv)
+        // where deriv = 1 if i == j_y, else 0
+        Dual in_x_dual[NUM_ACT_SET * 6];
+        for (int i = 0; i < dim_y; ++i) {
+            double deriv = (i == j_y) ? 1.0 : 0.0;
+            in_x_dual[i] = Dual(in_x_base[i], deriv);
+        }
 
-            int col = j * 3 + i;
-            for (int k = 0; k < 3; ++k) {
-                int row = j * 6 + k;
-                J_yu(row, col) = -dtau_du[k];  // Residual = computed - target
+        // Evaluate residual with seeded y using templated DYNNLEquation_YY_T
+        Dual out_y_dual[NUM_ACT_SET * 6];
+        Dual out_u0_dual[3];
+        Dual out_tau_dual[NUM_ACT_SET * 3];
+
+        DYNNLEquation_YY_T<Dual>(in_x_dual, out_y_dual, eqn_params, muhat_double,
+                                  out_u0_dual, out_tau_dual);
+
+        // Extract derivatives ∂r/∂y[j_y] from Dual numbers (column j_y of J_yy)
+        for (int row = 0; row < dim_y; ++row) {
+            J_yy(row, j_y) = out_y_dual[row].deriv;
+        }
+    }
+
+    // DEBUG: Print J_yy statistics
+    std::cerr << "\n[J_yy Diagnostics]" << std::endl;
+    std::cerr << "  J_yy shape: " << J_yy.rows() << " x " << J_yy.cols() << std::endl;
+    std::cerr << "  J_yy norm: " << J_yy.norm() << std::endl;
+    std::cerr << "  J_yy max abs: " << J_yy.cwiseAbs().maxCoeff() << std::endl;
+
+    // Check diagonal dominance
+    double diag_norm = 0.0;
+    double offdiag_norm = 0.0;
+    for (int i = 0; i < dim_y; ++i) {
+        diag_norm += J_yy(i, i) * J_yy(i, i);
+        for (int j = 0; j < dim_y; ++j) {
+            if (i != j) {
+                offdiag_norm += J_yy(i, j) * J_yy(i, j);
             }
         }
     }
+    std::cerr << "  J_yy diagonal norm: " << std::sqrt(diag_norm) << std::endl;
+    std::cerr << "  J_yy off-diagonal norm: " << std::sqrt(offdiag_norm) << std::endl;
+
+    // Check mL-nL coupling
+    if (NUM_ACT_SET > 0) {
+        double mL_nL_coupling = 0.0;
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 3; j < 6; ++j) {
+                mL_nL_coupling += std::abs(J_yy(i, j)) + std::abs(J_yy(j, i));
+            }
+        }
+        std::cerr << "  J_yy mL-nL coupling (sum |J(mL,nL)| + |J(nL,mL)|): " << mL_nL_coupling << std::endl;
+    }
+    std::cerr.flush();
+
+    // Compute J_yu using forward-mode automatic differentiation (NO FD, NO heuristics)
+    //
+    // Sprint S8: Exact J_yu via correct physical seeding of the u → MagMoment → muhat chain.
+    // Physical mapping: MagMoment[j] = CoilAlignmentTurnAreaMatrix[j] * u[j]
+    // For each control input u[j][i], we seed MagMoment[j] with ∂MagMoment/∂u[j][i],
+    // propagate through wHat_T to get seeded muhat, then evaluate the residual with
+    // templated DYNNLEquation_T to extract ∂r/∂u[j][i] from the Dual derivatives.
+
+    J_yu.setZero();
+
+    // Note: in_x_base and MagMoment are already declared and initialized above for J_yy computation
+
+    // For each control input u[j][i], compute ∂r/∂u[j][i] via forward-mode AD
+    // Physical mapping: MagMoment[j] = CoilAlignmentTurnAreaMatrix[j] * u[j]
+    // Therefore: ∂MagMoment[j]/∂u[j][i] = CoilAlignmentTurnAreaMatrix[j][:, i]
+
+    // DEBUG: Print CoilAlignmentTurnAreaMatrix for first actuator
+    if (NUM_ACT_SET > 0) {
+        std::cerr << "DEBUG J_yu: CoilAlignmentTurnAreaMatrix[0] = [";
+        for (int i = 0; i < 9; ++i) {
+            std::cerr << shooting_params.CoilAlignmentTurnAreaMatrix[0][i] << (i < 8 ? ", " : "");
+        }
+        std::cerr << "]" << std::endl;
+        std::cerr << "DEBUG J_yu: MagMoment[0] = [" << MagMoment[0][0] << ", " << MagMoment[0][1] << ", " << MagMoment[0][2] << "]" << std::endl;
+        std::cerr.flush();
+    }
+
+    for (int j_ctrl = 0; j_ctrl < NUM_ACT_SET; ++j_ctrl) {
+        for (int i_ctrl = 0; i_ctrl < 3; ++i_ctrl) {
+            // Seed MagMoment[j_ctrl] with exact derivative ∂MagMoment/∂u[j_ctrl][i_ctrl]
+            // = CoilAlignmentTurnAreaMatrix[j_ctrl][:, i_ctrl]
+            Dual MagMoment_seeded[NUM_ACT_SET][3];
+            for (int k = 0; k < NUM_ACT_SET; ++k) {
+                for (int m = 0; m < 3; ++m) {
+                    if (k == j_ctrl) {
+                        // Extract ∂MagMoment[k][m]/∂u[k][i_ctrl] from CoilAlignmentTurnAreaMatrix
+                        // Matrix is stored in row-major order: [row][col] = [row*3 + col]
+                        double deriv = shooting_params.CoilAlignmentTurnAreaMatrix[k][m * 3 + i_ctrl];
+                        MagMoment_seeded[k][m] = Dual(MagMoment[k][m], deriv);
+
+                        // DEBUG: Print seeding for first column
+                        if (j_ctrl == 0 && i_ctrl == 0 && m == 0) {
+                            std::cerr << "DEBUG J_yu: Seeding MagMoment[" << k << "][" << m << "] with deriv = " << deriv << std::endl;
+                            std::cerr.flush();
+                        }
+                    } else {
+                        // Other actuators: no derivative w.r.t. u[j_ctrl][i_ctrl]
+                        MagMoment_seeded[k][m] = Dual(MagMoment[k][m], 0.0);
+                    }
+                }
+            }
+
+            // Propagate derivatives through wHat: muhat = wHat(MagMoment)
+            // wHat_T is templated and handles Dual number propagation automatically
+            Dual muhat_seeded[NUM_ACT_SET][9];
+            for (int k = 0; k < NUM_ACT_SET; ++k) {
+                wHat_T<Dual>(MagMoment_seeded[k], muhat_seeded[k]);
+            }
+
+            // Evaluate BVP residual with seeded muhat using templated DYNNLEquation_T
+            Dual out_y_dual[NUM_ACT_SET * 6];
+            Dual out_u0_dual[3];
+            Dual out_tau_dual[NUM_ACT_SET * 3];
+
+            DYNNLEquation_T<Dual>(in_x_base, out_y_dual, eqn_params, muhat_seeded, out_u0_dual, out_tau_dual);
+
+            // Extract derivatives ∂r/∂u[j][i] from Dual numbers
+            int col = j_ctrl * 3 + i_ctrl;
+            for (int row = 0; row < dim_y; ++row) {
+                J_yu(row, col) = out_y_dual[row].deriv;
+            }
+
+            // DEBUG: Print extracted gradients for first column
+            if (j_ctrl == 0 && i_ctrl == 0) {
+                std::cerr << "DEBUG J_yu: out_y_dual[0].deriv = " << out_y_dual[0].deriv << std::endl;
+                std::cerr << "DEBUG J_yu: J_yu(0,0) = " << J_yu(0, 0) << std::endl;
+                std::cerr.flush();
+            }
+        }
+    }
+
+    // DEBUG: Print final J_yu statistics
+    std::cerr << "DEBUG J_yu final: norm = " << J_yu.norm() << ", max = " << J_yu.cwiseAbs().maxCoeff() << std::endl;
+    std::cerr << "DEBUG J_yu final: J_yu(0,0) = " << J_yu(0, 0) << std::endl;
+    std::cerr.flush();
 }
 
 

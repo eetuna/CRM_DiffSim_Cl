@@ -22,6 +22,7 @@ namespace CRMCatheterModel {
         char CoilTurnAreaMat_var[] = "CoilTurnAreaMat";
         char SegmentLengths_var[] = "SegmentLengths";
         char ActMass_var[] = "ActMass";
+        char ActDamping_var[] = "ActDamping";
         char MarkerLoc_var[] = "MarkerLoc";
         char rho_var[] = "rho";
         char ustarlist_var[] = "ustarlist";
@@ -80,6 +81,13 @@ namespace CRMCatheterModel {
             ix++;
         }
 
+        // Initialize ActDamping to default values (will be overwritten if present in file)
+        for (ix = 0; ix < no_act; ix++) {
+            for (jx = 0; jx < 6; jx++) {
+                CathParams.ActDamping[ix][jx] = 1.0;  // Default damping coefficient (1/time units)
+            }
+        }
+
         // And, let's process the remaining parameters
         while (getline(File, line)) {  // we will ignore blank lines
             std::istringstream line_(line);
@@ -119,6 +127,13 @@ namespace CRMCatheterModel {
             }
             else if (var == ActMass_var) {
                 for (ix = 0; ix < no_act; ix++) line_ >> CathParams.ActMass[ix];
+            }
+            else if (var == ActDamping_var) {
+                for (ix = 0; ix < no_act; ix++) {
+                    for (jx = 0; jx < 6; jx++) {
+                        line_ >> CathParams.ActDamping[ix][jx];
+                    }
+                }
             }
             else if (var == SegmentLengths_var) {
                 for (ix = 0; ix < no_seg; ix++) line_ >> CathParams.SegLengths[ix];

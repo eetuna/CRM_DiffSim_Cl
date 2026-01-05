@@ -1,7 +1,7 @@
 """
-Finite-Horizon LQR Solver for Catheter Trajectory Initialization
+FULLSTATE Finite-Horizon LQR Solver for Catheter Trajectory Initialization
 
-Provides LQR warm-start capability for iLQR optimization by:
+Provides LQR warm-start capability for iLQR optimization using TRUE legacy dynamics (18·N+15):
 1. Linearizing dynamics along a nominal trajectory (typically zero control)
 2. Solving backward Riccati recursion with quadratic cost
 3. Computing time-varying feedback gains K_t and feedforward terms k_t
@@ -11,61 +11,63 @@ This initialization improves iLQR convergence by providing a dynamically-feasibl
 starting point that already incorporates feedback stabilization.
 """
 import numpy as np
-import torch
 import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'build'))
-from crm_dynamics_torch import dynamics_step
+import crm_diff_py
+from control.true_legacy_step import true_legacy_linearize, true_legacy_tip_jacobian
+from control.true_legacy_state_adapter import (
+    pack_true_legacy_state, unpack_true_legacy_state, true_legacy_state_dim
+)
 
 
 def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
-                       Q=None, R=None, terminal_weight=1.0,
+                       n_act=1, Q=None, R=None, terminal_weight=1.0,
                        u_nominal=None, verbose=False):
     """
-    Solve finite-horizon LQR for catheter trajectory initialization.
+    Solve finite-horizon LQR for catheter trajectory initialization using FULLSTATE dynamics.
 
     Linearizes dynamics along a nominal trajectory (zero or provided control),
     then solves LQR to produce a warm-start control sequence.
 
     Args:
-        x0: np.array (6,), initial state
+        x0: np.array (state_dim,), initial state
         p_target: np.array (3,), target tip position (mm)
         dt: float, timestep (seconds)
         L_inserted: float, insertion length (mm)
         params_dict: dict, catheter parameters
         horizon: int, planning horizon
-        Q: np.array (6, 6), state cost matrix (default: zeros)
-        R: np.array (3, 3), control cost matrix (default: I)
+        n_act: int, number of actuator sets (default: 1)
+        Q: np.array (state_dim, state_dim), state cost matrix (default: zeros)
+        R: np.array (3*n_act, 3*n_act), control cost matrix (default: I)
         terminal_weight: float, weight on terminal tip error
-        u_nominal: np.array (horizon, 3), nominal control for linearization (default: zeros)
+        u_nominal: np.array (horizon, 3*n_act), nominal control for linearization (default: zeros)
         verbose: bool, print debug info
 
     Returns:
-        U_lqr: np.array (horizon, 3), LQR-optimized control sequence
-        X_lqr: np.array (horizon+1, 6), resulting state trajectory
+        U_lqr: np.array (horizon, 3*n_act), LQR-optimized control sequence
+        X_lqr: np.array (horizon+1, state_dim), resulting state trajectory
         P_tip_lqr: np.array (horizon+1, 3), resulting tip positions
     """
-    import crm_diff_py
+    state_dim = true_legacy_state_dim(n_act)  # 18*n_act + 15
+    control_dim = 3 * n_act
 
     # Default cost matrices
     if Q is None:
-        Q = np.zeros((6, 6))
+        Q = np.zeros((state_dim, state_dim))
     if R is None:
-        R = np.eye(3)
+        R = np.eye(control_dim)
 
     # Nominal trajectory for linearization
     if u_nominal is None:
         # Use a small bias toward target to seed the linearization
-        # Compute rough direction from initial tip to target
-        import crm_diff_py
-        result_init = crm_diff_py.dynamics_forward(x0, np.zeros(3), 0.0, L_inserted, params_dict)
-        p_init = result_init['p_tip']
+        x_coil_init, xf_init = unpack_true_legacy_state(x0, n_act)
+        p_init = xf_init[:3]
         direction = p_target - p_init
 
         # Simple heuristic: small constant control in direction of target
-        # This provides a non-zero nominal trajectory to linearize around
-        u_bias = np.zeros(3)
+        u_bias = np.zeros(control_dim)
         if np.linalg.norm(direction[:2]) > 0.1:  # If target is off-axis
             # Use first two coils to steer
             u_bias[0] = 0.05 * np.sign(direction[0]) if abs(direction[0]) > 0.1 else 0.0
@@ -79,13 +81,13 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
         print(f"[LQR] Computing linearization along nominal trajectory...")
 
     # ===== STEP 1: Nominal rollout + linearization =====
-    X_nom = np.zeros((horizon + 1, 6))
+    X_nom = np.zeros((horizon + 1, state_dim))
     P_tip_nom = np.zeros((horizon + 1, 3))
     X_nom[0] = x0
 
     # Get initial tip position
-    result_init = crm_diff_py.dynamics_forward(x0, np.zeros(3), 0.0, L_inserted, params_dict)
-    P_tip_nom[0] = result_init['p_tip']
+    x_coil_0, xf_0 = unpack_true_legacy_state(x0, n_act)
+    P_tip_nom[0] = xf_0[:3]
 
     A_list = []  # Jacobians ∂x_next/∂x_t
     B_list = []  # Jacobians ∂x_next/∂u_t
@@ -96,46 +98,36 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
         u_t = U_nom[t]
 
         # Forward rollout
-        result = crm_diff_py.dynamics_forward(x_t, u_t, dt, L_inserted, params_dict)
-        if result['status'] != 0:
-            raise RuntimeError(f"[LQR] Nominal rollout failed at t={t}: status={result['status']}")
+        x_coil_t, xf_t = unpack_true_legacy_state(x_t, n_act)
+        u_t_reshaped = u_t.reshape(n_act, 3)
+        result = crm_diff_py.true_legacy_step_forward(
+            x_coil_t, xf_t, u_t_reshaped, dt, params_dict
+        )
+        if not result['converged']:
+            raise RuntimeError(f"[LQR] Nominal rollout failed at t={t}: converged={result['converged']}")
 
-        X_nom[t+1] = result['x_next']
-        P_tip_nom[t+1] = result['p_tip']
+        X_nom[t+1] = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])
+        P_tip_nom[t+1] = result['xf_next'][:3]
 
-        # Linearize via PyTorch autograd
-        x_t_torch = torch.tensor(x_t, dtype=torch.float64, requires_grad=True)
-        u_t_torch = torch.tensor(u_t, dtype=torch.float64, requires_grad=True)
-
-        # A = ∂x_next/∂x_t
-        A_t = torch.autograd.functional.jacobian(
-            lambda x: dynamics_step(x, u_t_torch, dt, L_inserted, params_dict),
-            x_t_torch
-        ).numpy()
-
-        # B = ∂x_next/∂u_t
-        B_t = torch.autograd.functional.jacobian(
-            lambda u: dynamics_step(x_t_torch, u, dt, L_inserted, params_dict),
-            u_t_torch
-        ).numpy()
+        # Linearize via analytic implicit function theorem
+        u_t_reshaped = u_t.reshape(n_act, 3)
+        A_t, B_t = true_legacy_linearize(
+            x_t, u_t_reshaped, dt,
+            n_act=n_act,
+            catheter_params=params_dict,
+            L_inserted=L_inserted,
+            method="implicit"
+        )
 
         A_list.append(A_t)
         B_list.append(B_t)
 
         # Tip Jacobian ∂p_tip/∂x (for terminal cost)
-        x_next_torch = torch.tensor(X_nom[t+1], dtype=torch.float64, requires_grad=True)
-
-        def tip_position_fn(x_in):
-            res = crm_diff_py.dynamics_forward(
-                x_in.detach().cpu().numpy(),
-                np.zeros(3),
-                0.0,
-                L_inserted,
-                params_dict
-            )
-            return torch.from_numpy(res['p_tip'])
-
-        J_p_t = torch.autograd.functional.jacobian(tip_position_fn, x_next_torch).numpy()
+        # Use simple extraction: tip position is first 3 elements of xf in packed state
+        # For FULLSTATE (18*n_act + 15), xf starts at index 18*n_act
+        J_p_t = np.zeros((3, state_dim))
+        xf_start = 18 * n_act
+        J_p_t[:, xf_start:xf_start+3] = np.eye(3)  # ∂p_tip/∂xf[:3] = I
         J_p_list.append(J_p_t)
 
     # ===== STEP 2: Terminal cost derivatives =====
@@ -144,10 +136,10 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
     J_p_final = J_p_list[-1]
 
     # V_x = ∂L_T/∂x = 2 * w * J_p^T * (p_tip - p_target)
-    V_x = 2.0 * terminal_weight * J_p_final.T @ tip_error  # (6,)
+    V_x = 2.0 * terminal_weight * J_p_final.T @ tip_error  # (state_dim,)
 
     # V_xx = ∂²L_T/∂x² ≈ 2 * w * J_p^T * J_p (Gauss-Newton)
-    V_xx = 2.0 * terminal_weight * (J_p_final.T @ J_p_final)  # (6, 6)
+    V_xx = 2.0 * terminal_weight * (J_p_final.T @ J_p_final)  # (state_dim, state_dim)
     V_xx = 0.5 * (V_xx + V_xx.T)  # Symmetrize
 
     if verbose:
@@ -164,11 +156,11 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
         u_t = U_nom[t]
 
         # Running cost derivatives
-        l_x = 2.0 * Q @ x_t  # (6,)
-        l_u = 2.0 * R @ u_t  # (3,)
-        l_xx = 2.0 * Q  # (6, 6)
-        l_uu = 2.0 * R  # (3, 3)
-        l_ux = np.zeros((3, 6))
+        l_x = 2.0 * Q @ x_t  # (state_dim,)
+        l_u = 2.0 * R @ u_t  # (control_dim,)
+        l_xx = 2.0 * Q  # (state_dim, state_dim)
+        l_uu = 2.0 * R  # (control_dim, control_dim)
+        l_ux = np.zeros((control_dim, state_dim))
 
         # Q-function derivatives
         Q_x = l_x + A_t.T @ V_x
@@ -183,7 +175,7 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
 
         # LQR gains (regularization for numerical stability)
         reg = 1e-4
-        Q_uu_reg = Q_uu + reg * np.eye(3)
+        Q_uu_reg = Q_uu + reg * np.eye(control_dim)
 
         try:
             # k = -Q_uu^{-1} Q_u (feedforward)
@@ -208,8 +200,8 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
         print(f"[LQR] Backward pass complete, gains computed for {horizon} timesteps")
 
     # ===== STEP 4: Forward pass with LQR control =====
-    X_lqr = np.zeros((horizon + 1, 6))
-    U_lqr = np.zeros((horizon, 3))
+    X_lqr = np.zeros((horizon + 1, state_dim))
+    U_lqr = np.zeros((horizon, control_dim))
     P_tip_lqr = np.zeros((horizon + 1, 3))
 
     X_lqr[0] = x0
@@ -226,8 +218,12 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
         U_lqr[t] = u_t
 
         # Forward dynamics
-        result = crm_diff_py.dynamics_forward(X_lqr[t], u_t, dt, L_inserted, params_dict)
-        if result['status'] != 0:
+        x_coil_t, xf_t = unpack_true_legacy_state(X_lqr[t], n_act)
+        u_t_reshaped = u_t.reshape(n_act, 3)
+        result = crm_diff_py.true_legacy_step_forward(
+            x_coil_t, xf_t, u_t_reshaped, dt, params_dict
+        )
+        if not result['converged']:
             # LQR rollout failed, fall back to nominal
             if verbose:
                 print(f"[LQR] Warning: forward pass failed at t={t}, using nominal control")
@@ -235,8 +231,8 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
             P_tip_lqr[t+1] = P_tip_nom[t+1]
             U_lqr[t] = U_nom[t]
         else:
-            X_lqr[t+1] = result['x_next']
-            P_tip_lqr[t+1] = result['p_tip']
+            X_lqr[t+1] = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])
+            P_tip_lqr[t+1] = result['xf_next'][:3]
 
     if verbose:
         final_tip_error = np.linalg.norm(P_tip_lqr[-1] - p_target)

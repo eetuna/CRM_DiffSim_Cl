@@ -395,4 +395,139 @@ namespace CRMCatheterModel {
 
 	};
 
+	// =========================================================================
+	// Templated State Vector Types for Forward-Mode AD
+	// =========================================================================
+
+	// Templated StateDerivativeVector for use with Dual numbers or other types
+	template<typename T>
+	class StateDerivativeVector_T {
+	public:
+		T _u[3];  // curvature derivative
+
+		StateDerivativeVector_T() {
+			for (int i = 0; i < 3; ++i) _u[i] = T(0.0);
+		}
+
+		StateDerivativeVector_T(const StateDerivativeVector_T<T>& obj) {
+			for (int i = 0; i < 3; ++i) _u[i] = obj._u[i];
+		}
+
+		StateDerivativeVector_T<T>& operator=(const StateDerivativeVector_T<T>& rhs) {
+			if (this == &rhs) return *this;
+			for (int i = 0; i < 3; ++i) _u[i] = rhs._u[i];
+			return *this;
+		}
+
+		const StateDerivativeVector_T<T> operator+(const StateDerivativeVector_T<T>& obj) const {
+			StateDerivativeVector_T<T> result;
+			for (int i = 0; i < 3; ++i) result._u[i] = this->_u[i] + obj._u[i];
+			return result;
+		}
+
+		const StateDerivativeVector_T<T> operator*(const double& scalar) const {
+			StateDerivativeVector_T<T> result;
+			for (int i = 0; i < 3; ++i) result._u[i] = this->_u[i] * scalar;
+			return result;
+		}
+
+		friend const StateDerivativeVector_T<T> operator*(const double& scalar, const StateDerivativeVector_T<T>& obj) {
+			StateDerivativeVector_T<T> result;
+			for (int i = 0; i < 3; ++i) result._u[i] = scalar * obj._u[i];
+			return result;
+		}
+	};
+
+	// Templated StateVector for use with Dual numbers or other types
+	template<typename T>
+	class StateVector_T {
+	public:
+		T _p[3];       // position
+		double _R[9];  // rotation (stays double - integrated analytically)
+		T _u[3];       // curvature
+
+		StateVector_T() {
+			for (int i = 0; i < 3; ++i) {
+				_p[i] = T(0.0);
+				_u[i] = T(0.0);
+			}
+			for (int i = 0; i < 9; ++i) {
+				_R[i] = 0.0;
+			}
+		}
+
+		StateVector_T(const StateVector_T<T>& obj) {
+			for (int i = 0; i < 3; ++i) {
+				_p[i] = obj._p[i];
+				_u[i] = obj._u[i];
+			}
+			for (int i = 0; i < 9; ++i) {
+				_R[i] = obj._R[i];
+			}
+		}
+
+		StateVector_T<T>& operator=(const StateVector_T<T>& rhs) {
+			if (this == &rhs) return *this;
+			for (int i = 0; i < 3; ++i) {
+				_p[i] = rhs._p[i];
+				_u[i] = rhs._u[i];
+			}
+			for (int i = 0; i < 9; ++i) {
+				_R[i] = rhs._R[i];
+			}
+			return *this;
+		}
+
+		StateVector_T<T>& operator=(const StateDerivativeVector_T<T>& rhs) {
+			for (int i = 0; i < 3; ++i) {
+				_u[i] = rhs._u[i];
+			}
+			return *this;
+		}
+
+		const StateVector_T<T> operator+(const StateVector_T<T>& obj) const {
+			StateVector_T<T> result;
+			for (int i = 0; i < 3; ++i) {
+				result._p[i] = this->_p[i] + obj._p[i];
+				result._u[i] = this->_u[i] + obj._u[i];
+			}
+			for (int i = 0; i < 9; ++i) {
+				result._R[i] = this->_R[i] + obj._R[i];
+			}
+			return result;
+		}
+
+		const StateVector_T<T> operator+(const StateDerivativeVector_T<T>& obj) const {
+			StateVector_T<T> result(*this);
+			for (int i = 0; i < 3; ++i) {
+				result._u[i] += obj._u[i];
+			}
+			return result;
+		}
+
+		const StateVector_T<T> operator*(const double& scalar) const {
+			StateVector_T<T> result;
+			for (int i = 0; i < 3; ++i) {
+				result._p[i] = this->_p[i] * scalar;
+				result._u[i] = this->_u[i] * scalar;
+			}
+			for (int i = 0; i < 9; ++i) {
+				result._R[i] = this->_R[i] * scalar;
+			}
+			return result;
+		}
+
+		friend const StateVector_T<T> operator*(const double& scalar, const StateVector_T<T>& obj) {
+			StateVector_T<T> result;
+			for (int i = 0; i < 3; ++i) {
+				result._p[i] = scalar * obj._p[i];
+				result._u[i] = scalar * obj._u[i];
+			}
+			for (int i = 0; i < 9; ++i) {
+				result._R[i] = scalar * obj._R[i];
+			}
+			return result;
+		}
+	};
+
 }

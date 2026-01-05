@@ -66,17 +66,25 @@ def true_legacy_step(
     Raises:
         ValueError: If input shapes are invalid
     """
-    # Store original dtype and device
-    original_dtype = x.dtype
-    original_device = x.device
+    # Detect if inputs are torch tensors or numpy arrays
+    is_torch_input = isinstance(x, torch.Tensor)
+
+    # Store original dtype and device for torch, or dtype for numpy
+    if is_torch_input:
+        original_dtype = x.dtype
+        original_device = x.device
+    else:
+        original_dtype = x.dtype
+        original_device = None
 
     # Validate inputs
-    if x.dim() not in [1, 2]:
+    x_ndim = x.ndim
+    if x_ndim not in [1, 2]:
         raise ValueError(
             f"x must be 1D [state_dim] or 2D [B, state_dim], got shape {x.shape}"
         )
 
-    is_batched = (x.dim() == 2)
+    is_batched = (x_ndim == 2)
     expected_state_dim = true_legacy_state_dim(n_act)
 
     if is_batched:
@@ -194,8 +202,13 @@ def _true_legacy_step_single(
 
     This calls the C++ binding crm_diff_py.true_legacy_step_forward.
     """
-    original_dtype = x.dtype
-    original_device = x.device
+    is_torch_input = isinstance(x, torch.Tensor)
+    if is_torch_input:
+        original_dtype = x.dtype
+        original_device = x.device
+    else:
+        original_dtype = x.dtype
+        original_device = None
 
     # Unpack TRUE legacy state
     x_coil, xf = unpack_true_legacy_state(x, n_act)
@@ -203,9 +216,14 @@ def _true_legacy_step_single(
     # xf: [15]
 
     # Convert to numpy for C++ binding (ensure float64 and contiguous)
-    x_coil_np = x_coil.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
-    xf_np = xf.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
-    u_np = u.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
+    if is_torch_input:
+        x_coil_np = x_coil.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
+        xf_np = xf.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
+        u_np = u.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
+    else:
+        x_coil_np = np.asarray(x_coil, dtype=np.float64, order='C')
+        xf_np = np.asarray(xf, dtype=np.float64, order='C')
+        u_np = np.asarray(u, dtype=np.float64, order='C')
 
     # Extract warm-start if provided
     mL_guess_np = None
@@ -224,8 +242,12 @@ def _true_legacy_step_single(
                 f"nL_guess must have shape [{n_act}, 3], got {nL_guess.shape}"
             )
 
-        mL_guess_np = mL_guess.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
-        nL_guess_np = nL_guess.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
+        if is_torch_input:
+            mL_guess_np = mL_guess.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
+            nL_guess_np = nL_guess.detach().cpu().numpy().astype(np.float64, order='C', copy=False)
+        else:
+            mL_guess_np = np.asarray(mL_guess, dtype=np.float64, order='C')
+            nL_guess_np = np.asarray(nL_guess, dtype=np.float64, order='C')
 
     # Call C++ binding
     result = crm_diff_py.true_legacy_step_forward(
@@ -242,26 +264,44 @@ def _true_legacy_step_single(
     nL_next_np = result['nL_next']          # [n_act, 3]
     converged = result['converged']         # bool
 
-    # Convert back to torch tensors
-    x_coil_next = torch.from_numpy(x_coil_next_np).to(dtype=original_dtype, device=original_device)
-    xf_next = torch.from_numpy(xf_next_np).to(dtype=original_dtype, device=original_device)
+    # Convert back to torch tensors or keep as numpy
+    if is_torch_input:
+        x_coil_next = torch.from_numpy(x_coil_next_np).to(dtype=original_dtype, device=original_device)
+        xf_next = torch.from_numpy(xf_next_np).to(dtype=original_dtype, device=original_device)
+    else:
+        x_coil_next = x_coil_next_np.astype(original_dtype, copy=False)
+        xf_next = xf_next_np.astype(original_dtype, copy=False)
 
     # Pack next state
     x_next = pack_true_legacy_state(x_coil_next, xf_next)
 
     # Package observables
-    obs = {
-        'tip_p': torch.from_numpy(tip_p_np).to(dtype=original_dtype, device=original_device),
-        'tip_u': torch.from_numpy(tip_u_np).to(dtype=original_dtype, device=original_device),
-        'converged': converged,
-        'warmstart_next': {
-            'mL_guess': torch.from_numpy(mL_next_np).to(dtype=original_dtype, device=original_device),
-            'nL_guess': torch.from_numpy(nL_next_np).to(dtype=original_dtype, device=original_device),
+    if is_torch_input:
+        obs = {
+            'tip_p': torch.from_numpy(tip_p_np).to(dtype=original_dtype, device=original_device),
+            'tip_u': torch.from_numpy(tip_u_np).to(dtype=original_dtype, device=original_device),
+            'converged': converged,
+            'warmstart_next': {
+                'mL_guess': torch.from_numpy(mL_next_np).to(dtype=original_dtype, device=original_device),
+                'nL_guess': torch.from_numpy(nL_next_np).to(dtype=original_dtype, device=original_device),
+            }
         }
-    }
+    else:
+        obs = {
+            'tip_p': tip_p_np.astype(original_dtype, copy=False),
+            'tip_u': tip_u_np.astype(original_dtype, copy=False),
+            'converged': converged,
+            'warmstart_next': {
+                'mL_guess': mL_next_np.astype(original_dtype, copy=False),
+                'nL_guess': nL_next_np.astype(original_dtype, copy=False),
+            }
+        }
 
     if return_orientation:
-        obs['tip_R'] = torch.from_numpy(tip_R_np).to(dtype=original_dtype, device=original_device)
+        if is_torch_input:
+            obs['tip_R'] = torch.from_numpy(tip_R_np).to(dtype=original_dtype, device=original_device)
+        else:
+            obs['tip_R'] = tip_R_np.astype(original_dtype, copy=False)
 
     return x_next, obs
 
@@ -274,7 +314,7 @@ def true_legacy_linearize(
     n_act: int,
     catheter_params: Dict,
     L_inserted: float = 100.0,
-    method: str = "torch_autograd",  # or "finite_diff"
+    method: str = "implicit",  # "implicit", "torch_autograd", or "finite_diff"
     eps: float = 1e-7
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -290,7 +330,7 @@ def true_legacy_linearize(
         n_act: Number of actuators
         catheter_params: Physics parameters
         L_inserted: Insertion depth (mm)
-        method: "torch_autograd" or "finite_diff"
+        method: "implicit" (default, analytic via IFT), "torch_autograd", or "finite_diff"
         eps: Finite difference epsilon (if method="finite_diff")
 
     Returns:
@@ -300,12 +340,42 @@ def true_legacy_linearize(
     state_dim = 18 * n_act + 15
     control_dim = n_act * 3
 
-    if method == "torch_autograd":
+    if method == "implicit":
+        return _linearize_implicit(x, u, dt, n_act, catheter_params, L_inserted)
+    elif method == "torch_autograd":
         return _linearize_autograd(x, u, dt, n_act, catheter_params, L_inserted)
     elif method == "finite_diff":
         return _linearize_finite_diff(x, u, dt, n_act, catheter_params, L_inserted, eps)
     else:
-        raise ValueError(f"Unknown method: {method}. Use 'torch_autograd' or 'finite_diff'")
+        raise ValueError(f"Unknown method: {method}. Use 'implicit', 'torch_autograd', or 'finite_diff'")
+
+
+def _linearize_implicit(x, u, dt, n_act, catheter_params, L_inserted):
+    """Compute Jacobians using C++ implicit function theorem implementation."""
+    # Unpack state
+    x_coil, xf = unpack_true_legacy_state(x, n_act)
+
+    # Ensure numpy arrays with correct dtype and layout
+    x_coil_np = np.ascontiguousarray(x_coil, dtype=np.float64)
+    xf_np = np.ascontiguousarray(xf, dtype=np.float64)
+    u_np = np.ascontiguousarray(u, dtype=np.float64)
+
+    # Update catheter_params with L_inserted
+    params_dict = catheter_params.copy()
+    params_dict['L_inserted'] = L_inserted
+
+    # Call C++ binding
+    result = crm_diff_py.true_legacy_linearize(
+        x_coil_np, xf_np, u_np, dt, params_dict
+    )
+
+    A = result['A']  # [state_dim, state_dim]
+    B = result['B']  # [state_dim, control_dim]
+
+    # Flatten B to match expected shape [state_dim, n_act*3]
+    B_flat = B.reshape(B.shape[0], -1)
+
+    return A, B_flat
 
 
 def _linearize_autograd(x, u, dt, n_act, catheter_params, L_inserted):

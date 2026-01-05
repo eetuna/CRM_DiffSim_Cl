@@ -84,6 +84,7 @@ namespace CRMCatheterModel {
 		double (*ustar)[3];					// (no_flex_seg) x 3 array of local curvature in unloaded configuration for each of the flexible segments; (NUM_FLEX_SEG) 3x1 vectors
 											//		Actuator segments are assumed to be straight
 		double* ActMass;					// no_act_set element array of Actuator Segment Masses, does not include the flexible substrate
+		double (*ActDamping)[6];			// no_act_set x 6 array of Actuator Damping Coefficients [vx, vy, vz, wx, wy, wz]; (NUM_ACT_SET) 6x1 vectors
 		double (*CoilAlignmentAngles)[2];	// no_act_set x 2 array of Coil Alignment Angles; for each actuator set, the angle for the first coil is relative to x axis, and the angle for the second coil is relative to y axis; (NUM_ACT_SET) 2x1 vectors
 		double (*CoilTurnAreaMat)[9]; 		// no_act_set x 9 array of Coil Turn Area matrices; (NUM_ACT_SET) 3x3 matrices, where each matrix is stored in row-major order
 		double* LocMarkers;					// no_locmarkers element array of localization marker locations (in lambda coordinates, distances measured from the tip)

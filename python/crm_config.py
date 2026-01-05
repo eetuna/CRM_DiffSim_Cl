@@ -130,6 +130,7 @@ def get_default_params_dict(cath_params_file=None, cath_config_file=None):
         'deltau0_initialguess': [0.0, 0.0, 0.0],
         'IntegrationStepSize': DEFAULT_INTEGRATION_STEP_SIZE,
         'FinalValueOnly': True,
+        'L_inserted': DEFAULT_L_INSERTED,
     }
 
     return params_dict
