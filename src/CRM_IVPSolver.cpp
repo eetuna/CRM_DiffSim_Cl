@@ -867,6 +867,23 @@ namespace CRMCatheterModel {
 			for (int32_t ix = 0; ix < no_locmarkers; ix++) for (int32_t jx = 0; jx < 3; jx++) p_atLocMarkers[ix][jx] = t.p_atLocMarkers[ix][jx];
 		for (int32_t ix = 0; ix < no_fcum_steps + 1; ix++) for (int32_t jx = 0; jx < 3; jx++) fcumlambda[ix][jx] = t.fcumlambda[ix][jx];
 
+        for (int32_t ix = 0; ix < no_act_set; ix++) {
+            for (int32_t jx = 0; jx < 3; jx++) {
+                v_L_pre[ix][jx] = t.v_L_pre[ix][jx];
+                w_L_pre[ix][jx] = t.w_L_pre[ix][jx];
+                p_pre[ix][jx] = t.p_pre[ix][jx];
+                m_L[ix][jx] = t.m_L[ix][jx];
+                n_L[ix][jx] = t.n_L[ix][jx];
+            }
+            for (int32_t jx = 0; jx < 9; jx++) {
+                R_pre[ix][jx] = t.R_pre[ix][jx];
+                actInertia[ix][jx] = t.actInertia[ix][jx];
+            }
+            for (int32_t jx = 0; jx < 6; jx++) {
+                damping[ix][jx] = t.damping[ix][jx];
+            }
+        }
+        DELTA_T = t.DELTA_T;
 	}
 
 	CRMIVPCoreParams::~CRMIVPCoreParams() {

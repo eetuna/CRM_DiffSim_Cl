@@ -696,19 +696,6 @@ template<typename T, typename ParamsT>
 void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
                      const T muhat[NUM_ACT_SET][9], T out_u0[3], T out_tau[NUM_ACT_SET*3]) {
 
-    // === DEBUG: Trace muhat derivatives at function entry ===
-    if constexpr (!std::is_same_v<T, double>) {
-        std::cout << "\n[DYNNLEquation_T] Entry - muhat derivatives:" << std::endl;
-        for (int j = 0; j < NUM_ACT_SET; ++j) {
-            std::cout << "  Coil " << j << ": ";
-            double max_deriv = 0.0;
-            for (int i = 0; i < 9; ++i) {
-                max_deriv = std::max(max_deriv, std::abs(muhat[j][i].deriv));
-            }
-            std::cout << "max|deriv|=" << max_deriv << std::endl;
-        }
-    }
-
     // output for time advance, not used in BVP, just placeholders
     T m_L[NUM_ACT_SET][3], n_L[NUM_ACT_SET][3];
     T n_0[3];
@@ -737,6 +724,9 @@ void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
         for (int i = 0; i < 9; ++i) {
             x_coil[j][i+9] = T(Params.R_pre[j][i]);
         }
+        for (int i = 0; i < NUM_COIL_STATES; ++i) {
+            out_x_coil[j][i] = T(0.0);
+        }
 
         actMass[j] = Params.ActMass[j];
         for (int i = 0; i < 9; ++i) {
@@ -750,6 +740,9 @@ void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
     auto& SegBounds = Params.SegBounds;
 
     T net_mL[3], tau[3], K2invResidual[3], u_t[3], du[3];
+    for (int i = 0; i < 3; ++i) {
+        net_mL[i] = T(0.0);
+    }
 
     double tau_0[3] = {0.0, 0.0, 0.0};
     T p_t[3];
@@ -768,6 +761,37 @@ void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
     T R_L[9];
     T v1[3], v2[3], v3[3], v_val[3];
 
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 6; ++i) {
+            residual[j][i] = T(0.0);
+        }
+    }
+    for (int i = 0; i < 3; ++i) {
+        tau[i] = T(0.0);
+        K2invResidual[i] = T(0.0);
+        u_t[i] = T(0.0);
+        du[i] = T(0.0);
+        u_tau[i] = T(0.0);
+        p_[i] = T(0.0);
+        u_L[i] = T(0.0);
+        u_f[i] = T(0.0);
+        p_f[i] = T(0.0);
+        out_xdot[i] = T(0.0);
+        out_xdot[i + 3] = T(0.0);
+        p_L[i] = T(0.0);
+        v1[i] = T(0.0);
+        v2[i] = T(0.0);
+        v3[i] = T(0.0);
+        v_val[i] = T(0.0);
+        p_t[i] = T(0.0);
+    }
+    for (int i = 0; i < 9; ++i) {
+        R_t[i] = T(0.0);
+        R_[i] = T(0.0);
+        R_f[i] = T(0.0);
+        R_L[i] = T(0.0);
+    }
+
     // root configurations for residual
     double p_d[3], R_d[9];
     for (int i = 0; i < 3; ++i) {
@@ -779,6 +803,10 @@ void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
 
     double RigidSegmentLength;
     T net_nL[3];
+
+    for (int i = 0; i < 3; ++i) {
+        net_nL[i] = T(0.0);
+    }
 
     auto& NUM_SEGMENTS = Params.no_segments;
 
@@ -882,29 +910,9 @@ void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
                     p_L[i] = out_x_coil[actno][i+6] + R_L[i*3+2] * T(RigidSegmentLength * 0.5);
                 }
 
-                // === DEBUG: Trace p_L derivatives before residual computation ===
-                if constexpr (!std::is_same_v<T, double>) {
-                    std::cout << "  [Residual] p_L derivatives for actno=" << actno << ": ";
-                    double max_deriv = 0.0;
-                    for (int i = 0; i < 3; ++i) {
-                        max_deriv = std::max(max_deriv, std::abs(p_L[i].deriv));
-                    }
-                    std::cout << "max|deriv|=" << max_deriv << std::endl;
-                }
-
                 // Compute residual: p_f - p_L (both carry derivatives!)
                 for (int i = 0; i < 3; ++i) {
                     residual[actno_mn][i] = p_f[i] - p_L[i];
-                }
-
-                // === DEBUG: Trace residual derivatives after computation ===
-                if constexpr (!std::is_same_v<T, double>) {
-                    std::cout << "  [Residual] residual[" << actno_mn << "] derivatives: ";
-                    double max_deriv = 0.0;
-                    for (int i = 0; i < 3; ++i) {
-                        max_deriv = std::max(max_deriv, std::abs(residual[actno_mn][i].deriv));
-                    }
-                    std::cout << "max|deriv|=" << max_deriv << std::endl;
                 }
                 for (int i = 0; i < 3; ++i) {
                     v1[i] = R_f[i*3] - R_L[i*3];
@@ -945,19 +953,6 @@ void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
         residual[actno][i+3] = T(0.5) * v_val[i];
     }
 
-    // === DEBUG: Trace derivatives in residuals before packing ===
-    if constexpr (!std::is_same_v<T, double>) {
-        std::cout << "[DYNNLEquation_T] Residual derivatives before packing:" << std::endl;
-        for (int i = 0; i < NUM_ACT_SET; ++i) {
-            std::cout << "  Coil " << i << " residual: ";
-            double max_deriv = 0.0;
-            for (int j = 0; j < 6; ++j) {
-                max_deriv = std::max(max_deriv, std::abs(residual[i][j].deriv));
-            }
-            std::cout << "max|deriv|=" << max_deriv << std::endl;
-        }
-    }
-
     // Pack residuals into output (extract .val for double output)
     for (int i = 0; i < NUM_ACT_SET; ++i) {
         for (int j = 0; j < 6; ++j) {
@@ -965,18 +960,6 @@ void DYNNLEquation_T(const double in_x[], T out_y[], ParamsT& Params,
         }
     }
 
-    // === DEBUG: Trace derivatives in out_y after packing ===
-    if constexpr (!std::is_same_v<T, double>) {
-        std::cout << "[DYNNLEquation_T] out_y derivatives after packing:" << std::endl;
-        for (int i = 0; i < NUM_ACT_SET; ++i) {
-            std::cout << "  Coil " << i << " out_y: ";
-            double max_deriv = 0.0;
-            for (int j = 0; j < 6; ++j) {
-                max_deriv = std::max(max_deriv, std::abs(out_y[j + i*6].deriv));
-            }
-            std::cout << "max|deriv|=" << max_deriv << std::endl;
-        }
-    }
 }
 
 // ============================================================================
@@ -1026,6 +1009,9 @@ void DYNNLEquation_YY_T(const T in_x[], T out_y[], ParamsT& Params,
         for (int i = 0; i < 9; ++i) {
             x_coil[j][i+9] = T(Params.R_pre[j][i]);
         }
+        for (int i = 0; i < NUM_COIL_STATES; ++i) {
+            out_x_coil[j][i] = T(0.0);
+        }
 
         actMass[j] = Params.ActMass[j];
         for (int i = 0; i < 9; ++i) {
@@ -1039,6 +1025,9 @@ void DYNNLEquation_YY_T(const T in_x[], T out_y[], ParamsT& Params,
     auto& SegBounds = Params.SegBounds;
 
     T net_mL[3], tau[3], K2invResidual[3], u_t[3], du[3];
+    for (int i = 0; i < 3; ++i) {
+        net_mL[i] = T(0.0);
+    }
 
     double tau_0[3] = {0.0, 0.0, 0.0};
     T p_t[3];
@@ -1057,6 +1046,37 @@ void DYNNLEquation_YY_T(const T in_x[], T out_y[], ParamsT& Params,
     T R_L[9];
     T v1[3], v2[3], v3[3], v_val[3];
 
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 6; ++i) {
+            residual[j][i] = T(0.0);
+        }
+    }
+    for (int i = 0; i < 3; ++i) {
+        tau[i] = T(0.0);
+        K2invResidual[i] = T(0.0);
+        u_t[i] = T(0.0);
+        du[i] = T(0.0);
+        u_tau[i] = T(0.0);
+        p_[i] = T(0.0);
+        u_L[i] = T(0.0);
+        u_f[i] = T(0.0);
+        p_f[i] = T(0.0);
+        out_xdot[i] = T(0.0);
+        out_xdot[i + 3] = T(0.0);
+        p_L[i] = T(0.0);
+        v1[i] = T(0.0);
+        v2[i] = T(0.0);
+        v3[i] = T(0.0);
+        v_val[i] = T(0.0);
+        p_t[i] = T(0.0);
+    }
+    for (int i = 0; i < 9; ++i) {
+        R_t[i] = T(0.0);
+        R_[i] = T(0.0);
+        R_f[i] = T(0.0);
+        R_L[i] = T(0.0);
+    }
+
     // root configurations for residual
     double p_d[3], R_d[9];
     for (int i = 0; i < 3; ++i) {
@@ -1068,6 +1088,10 @@ void DYNNLEquation_YY_T(const T in_x[], T out_y[], ParamsT& Params,
 
     double RigidSegmentLength;
     T net_nL[3];
+
+    for (int i = 0; i < 3; ++i) {
+        net_nL[i] = T(0.0);
+    }
 
     auto& NUM_SEGMENTS = Params.no_segments;
 

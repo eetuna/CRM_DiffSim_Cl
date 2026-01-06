@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <type_traits>
 
 namespace CRMCatheterModel {
 
@@ -211,7 +212,8 @@ void wHat_T(const T in_w[3], T out_what[9], unsigned int stride) {
 // ============================================================================
 
 // Matrix multiplication C=A*B where A is double, B is T, C is T
-template <typename T, int D1, int D2, int D3>
+template <typename T, int D1, int D2, int D3,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
 void mMult_AB_T(const double in_A[D1 * D2], const T in_B[D2 * D3], T out_C[D1 * D3]) {
 	for (int i = 0; i < D1; i++) {
 		for (int j = 0; j < D3; j++) {
@@ -225,7 +227,8 @@ void mMult_AB_T(const double in_A[D1 * D2], const T in_B[D2 * D3], T out_C[D1 * 
 }
 
 // Matrix multiplication C=A^T*B where A is double, B is double, C is T
-template <typename T, int D1, int D2, int D3>
+template <typename T, int D1, int D2, int D3,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
 void mMult_ATB_T(const double in_A[D1 * D2], const double in_B[D1 * D3], T out_C[D2 * D3]) {
 	for (int i = 0; i < D2; i++) {
 		for (int j = 0; j < D3; j++) {
@@ -239,7 +242,8 @@ void mMult_ATB_T(const double in_A[D1 * D2], const double in_B[D1 * D3], T out_C
 }
 
 // Matrix subtraction X=A-B where A is double, B is T, X is T
-template <typename T, int D1, int D2>
+template <typename T, int D1, int D2,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
 void mSub_AB_T(const double in_A[D1 * D2], const T in_B[D1 * D2], T out_X[D1 * D2]) {
 	for (int i = 0; i < D1 * D2; i++) {
 		out_X[i] = in_A[i] - in_B[i];
@@ -247,7 +251,8 @@ void mSub_AB_T(const double in_A[D1 * D2], const T in_B[D1 * D2], T out_X[D1 * D
 }
 
 // Matrix subtraction X=A-B where A is T, B is double, X is T
-template <typename T, int D1, int D2>
+template <typename T, int D1, int D2,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
 void mSub_AB_T(const T in_A[D1 * D2], const double in_B[D1 * D2], T out_X[D1 * D2]) {
 	for (int i = 0; i < D1 * D2; i++) {
 		out_X[i] = in_A[i] - in_B[i];
@@ -255,7 +260,8 @@ void mSub_AB_T(const T in_A[D1 * D2], const double in_B[D1 * D2], T out_X[D1 * D
 }
 
 // Matrix addition X=A+B where A is double, B is T, X is T
-template <typename T, int D1, int D2>
+template <typename T, int D1, int D2,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
 void mAdd_AB_T(const double in_A[D1 * D2], const T in_B[D1 * D2], T out_X[D1 * D2]) {
 	for (int i = 0; i < D1 * D2; i++) {
 		out_X[i] = in_A[i] + in_B[i];
@@ -263,7 +269,8 @@ void mAdd_AB_T(const double in_A[D1 * D2], const T in_B[D1 * D2], T out_X[D1 * D
 }
 
 // Matrix multiplication C=A*B where A is double, B is double, C is T (for type conversion)
-template <typename T, int D1, int D2, int D3>
+template <typename T, int D1, int D2, int D3,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
 void mMult_AB_T(const double in_A[D1 * D2], const double in_B[D2 * D3], T out_C[D1 * D3]) {
 	for (int i = 0; i < D1; i++) {
 		for (int j = 0; j < D3; j++) {

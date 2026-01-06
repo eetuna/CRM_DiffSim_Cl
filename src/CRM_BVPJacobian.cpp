@@ -290,38 +290,6 @@ void compute_bvp_jacobians_fmad(
         }
     }
 
-    // DEBUG: Print J_yy statistics
-    std::cerr << "\n[J_yy Diagnostics]" << std::endl;
-    std::cerr << "  J_yy shape: " << J_yy.rows() << " x " << J_yy.cols() << std::endl;
-    std::cerr << "  J_yy norm: " << J_yy.norm() << std::endl;
-    std::cerr << "  J_yy max abs: " << J_yy.cwiseAbs().maxCoeff() << std::endl;
-
-    // Check diagonal dominance
-    double diag_norm = 0.0;
-    double offdiag_norm = 0.0;
-    for (int i = 0; i < dim_y; ++i) {
-        diag_norm += J_yy(i, i) * J_yy(i, i);
-        for (int j = 0; j < dim_y; ++j) {
-            if (i != j) {
-                offdiag_norm += J_yy(i, j) * J_yy(i, j);
-            }
-        }
-    }
-    std::cerr << "  J_yy diagonal norm: " << std::sqrt(diag_norm) << std::endl;
-    std::cerr << "  J_yy off-diagonal norm: " << std::sqrt(offdiag_norm) << std::endl;
-
-    // Check mL-nL coupling
-    if (NUM_ACT_SET > 0) {
-        double mL_nL_coupling = 0.0;
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 3; j < 6; ++j) {
-                mL_nL_coupling += std::abs(J_yy(i, j)) + std::abs(J_yy(j, i));
-            }
-        }
-        std::cerr << "  J_yy mL-nL coupling (sum |J(mL,nL)| + |J(nL,mL)|): " << mL_nL_coupling << std::endl;
-    }
-    std::cerr.flush();
-
     // Compute J_yu using forward-mode automatic differentiation (NO FD, NO heuristics)
     //
     // Sprint S8: Exact J_yu via correct physical seeding of the u → MagMoment → muhat chain.
@@ -338,17 +306,6 @@ void compute_bvp_jacobians_fmad(
     // Physical mapping: MagMoment[j] = CoilAlignmentTurnAreaMatrix[j] * u[j]
     // Therefore: ∂MagMoment[j]/∂u[j][i] = CoilAlignmentTurnAreaMatrix[j][:, i]
 
-    // DEBUG: Print CoilAlignmentTurnAreaMatrix for first actuator
-    if (NUM_ACT_SET > 0) {
-        std::cerr << "DEBUG J_yu: CoilAlignmentTurnAreaMatrix[0] = [";
-        for (int i = 0; i < 9; ++i) {
-            std::cerr << shooting_params.CoilAlignmentTurnAreaMatrix[0][i] << (i < 8 ? ", " : "");
-        }
-        std::cerr << "]" << std::endl;
-        std::cerr << "DEBUG J_yu: MagMoment[0] = [" << MagMoment[0][0] << ", " << MagMoment[0][1] << ", " << MagMoment[0][2] << "]" << std::endl;
-        std::cerr.flush();
-    }
-
     for (int j_ctrl = 0; j_ctrl < NUM_ACT_SET; ++j_ctrl) {
         for (int i_ctrl = 0; i_ctrl < 3; ++i_ctrl) {
             // Seed MagMoment[j_ctrl] with exact derivative ∂MagMoment/∂u[j_ctrl][i_ctrl]
@@ -362,11 +319,6 @@ void compute_bvp_jacobians_fmad(
                         double deriv = shooting_params.CoilAlignmentTurnAreaMatrix[k][m * 3 + i_ctrl];
                         MagMoment_seeded[k][m] = Dual(MagMoment[k][m], deriv);
 
-                        // DEBUG: Print seeding for first column
-                        if (j_ctrl == 0 && i_ctrl == 0 && m == 0) {
-                            std::cerr << "DEBUG J_yu: Seeding MagMoment[" << k << "][" << m << "] with deriv = " << deriv << std::endl;
-                            std::cerr.flush();
-                        }
                     } else {
                         // Other actuators: no derivative w.r.t. u[j_ctrl][i_ctrl]
                         MagMoment_seeded[k][m] = Dual(MagMoment[k][m], 0.0);
@@ -394,19 +346,8 @@ void compute_bvp_jacobians_fmad(
                 J_yu(row, col) = out_y_dual[row].deriv;
             }
 
-            // DEBUG: Print extracted gradients for first column
-            if (j_ctrl == 0 && i_ctrl == 0) {
-                std::cerr << "DEBUG J_yu: out_y_dual[0].deriv = " << out_y_dual[0].deriv << std::endl;
-                std::cerr << "DEBUG J_yu: J_yu(0,0) = " << J_yu(0, 0) << std::endl;
-                std::cerr.flush();
-            }
         }
     }
-
-    // DEBUG: Print final J_yu statistics
-    std::cerr << "DEBUG J_yu final: norm = " << J_yu.norm() << ", max = " << J_yu.cwiseAbs().maxCoeff() << std::endl;
-    std::cerr << "DEBUG J_yu final: J_yu(0,0) = " << J_yu(0, 0) << std::endl;
-    std::cerr.flush();
 }
 
 
@@ -558,13 +499,9 @@ void compute_bvp_jacobians_full_analytic(
         }
     }
 
-    Dual muhat_dual[NUM_ACT_SET][9];
+    double muhat_double[NUM_ACT_SET][9];
     for (int j = 0; j < NUM_ACT_SET; ++j) {
-        Dual MagMoment_dual[3];
-        for (int i = 0; i < 3; ++i) {
-            MagMoment_dual[i] = Dual(shooting_params.MagMoment[j][i], 0.0);
-        }
-        wHat_T<Dual>(MagMoment_dual, muhat_dual[j]);
+        wHat(shooting_params.MagMoment[j], muhat_double[j]);
     }
 
     for (int col = 0; col < dim_x; ++col) {
@@ -587,11 +524,16 @@ void compute_bvp_jacobians_full_analytic(
             params_dual.xf[xf_idx] = Dual(eqn_params.xf[xf_idx], 1.0);
         }
 
+        Dual in_x_dual[NUM_ACT_SET * 6];
+        for (int i = 0; i < dim_y; ++i) {
+            in_x_dual[i] = Dual(in_x_base[i], 0.0);
+        }
+
         Dual out_y_dual[NUM_ACT_SET * 6];
         Dual out_u0_dual[3];
         Dual out_tau_dual[NUM_ACT_SET * 3];
 
-        DYNNLEquation_T<Dual>(in_x_base, out_y_dual, params_dual, muhat_dual, out_u0_dual, out_tau_dual);
+        DYNNLEquation_YY_T<Dual>(in_x_dual, out_y_dual, params_dual, muhat_double, out_u0_dual, out_tau_dual);
 
         for (int row = 0; row < dim_y; ++row) {
             J_yx(row, col) = out_y_dual[row].deriv;

@@ -127,29 +127,7 @@ void CoilIntegrad_T(const T in_twist[6], const T in_n[3], const double g[3],
     // Compute magnetic torque: τ_mag = muhat * R^T * B0
     mMult_ATB_T<T,3,3,1>(R, B0_T, RscTB0);  // R^T * B0
 
-    // === DEBUG: Trace muhat derivatives before magnetic torque computation ===
-    if constexpr (!std::is_same_v<T, double>) {
-        double max_muhat_deriv = 0.0;
-        for (int i = 0; i < 9; ++i) {
-            max_muhat_deriv = std::max(max_muhat_deriv, std::abs(muhat[i].deriv));
-        }
-        if (max_muhat_deriv > 1e-12) {
-            std::cout << "  [CoilIntegrad_T] muhat max|deriv|=" << max_muhat_deriv << std::endl;
-        }
-    }
-
     mMult_AB_T<T,3,3,1>(muhat, RscTB0, Tb);  // Tb = muhat * R^T * B0
-
-    // === DEBUG: Trace magnetic torque derivatives ===
-    if constexpr (!std::is_same_v<T, double>) {
-        double max_Tb_deriv = 0.0;
-        for (int i = 0; i < 3; ++i) {
-            max_Tb_deriv = std::max(max_Tb_deriv, std::abs(Tb[i].deriv));
-        }
-        if (max_Tb_deriv > 1e-12) {
-            std::cout << "  [CoilIntegrad_T] Tb (mag torque) max|deriv|=" << max_Tb_deriv << std::endl;
-        }
-    }
 
     // Net torque: tau = τ_mag - mL
     mSub_AB_T<T,3,1>(Tb, m_L, tau);
@@ -312,17 +290,6 @@ void RK2_coildyn_T(const T in_x_n[NUM_COIL_STATES], const T in_n[3], const doubl
     // Pack position and rotation into output state
     for (int i = 0; i < 3; ++i) out_x_np1[i+6] = p_np1[i];
     for (int i = 0; i < 9; ++i) out_x_np1[i+9] = R_np1[i];
-
-    // === DEBUG: Check if position derivatives are exploding ===
-    if constexpr (!std::is_same_v<T, double>) {
-        double max_p_deriv = 0.0;
-        for (int i = 0; i < 3; ++i) {
-            max_p_deriv = std::max(max_p_deriv, std::abs(p_np1[i].deriv));
-        }
-        if (max_p_deriv > 1e10) {
-            std::cout << "  [RK2_coildyn_T] WARNING: Position derivatives exploding! max|deriv|=" << max_p_deriv << std::endl;
-        }
-    }
 
     // Return derivative at current state
     for (int i = 0; i < 6; ++i) {

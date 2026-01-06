@@ -1,7 +1,8 @@
 #pragma once
 
-
-#define t_step 0.001
+namespace {
+constexpr double kCoilTStep = 0.001;
+}  // namespace
 
 #include "CRMDYN.hpp"
 #include "minpack_DYN.hpp"
@@ -150,7 +151,7 @@ void CoilDynamics( double in_coil_state[NUM_COIL_STATES], double in_n[3], double
     }
 
 
-    int N = ceil(DELTA_T / t_step);
+    int N = ceil(DELTA_T / kCoilTStep);
 
     for (int idx=0; idx<N; idx++) {
 
@@ -234,14 +235,14 @@ void RK2_coildyn(double in_x_n[NUM_COIL_STATES], double in_n[3], double g[3],  d
     //RK2_STEP_STEP1:
     CoilIntegrad(twist_n, nL, g, R_n, actMass, actInertia, damping,B0, muhat, mL, xdot_n);
     for (int i=0; i< 6 ; i++) {
-        k1[i] 			= t_step * xdot_n[i];
+        k1[i] 			= kCoilTStep * xdot_n[i];
         x_n_p_k1o2[i] 	= twist_n[i] + k1[i] * 0.5;
     }
 #ifdef ANALYTICAL_SE3_STEP
     // we will calculate R_np1half and p_np1half analytically, without numerical integration
     double R_np1half[9], p_np1half[3];
 
-    DYNSE3_TimeSpace(R_n, p_n, t_step*0.5, twist_n, R_np1half, p_np1half) ;
+    DYNSE3_TimeSpace(R_n, p_n, kCoilTStep * 0.5, twist_n, R_np1half, p_np1half) ;
 
 #endif
 
@@ -249,14 +250,14 @@ void RK2_coildyn(double in_x_n[NUM_COIL_STATES], double in_n[3], double g[3],  d
     CoilIntegrad(x_n_p_k1o2, nL, g, R_np1half, actMass, actInertia, damping,B0, muhat, mL,  k2oh);
 
     for (int i = 0; i < 6; i++) {
-        out_x_np1[i] = twist_n[i] + t_step * k2oh[i];
+        out_x_np1[i] = twist_n[i] + kCoilTStep * k2oh[i];
     }
 
 #ifdef ANALYTICAL_SE3_STEP
     // we will calculate R_np1 and p_np1 analytically, without numerical integration
     double R_np1[9], p_np1[3];
 
-    DYNSE3_TimeSpace(R_n, p_n, t_step,  x_n_p_k1o2, R_np1, p_np1) ;
+    DYNSE3_TimeSpace(R_n, p_n, kCoilTStep,  x_n_p_k1o2, R_np1, p_np1) ;
 
     // copy these to the output state
     for (int i = 0; i < 3; i++) out_x_np1[i+6] = p_np1[i];
@@ -323,13 +324,13 @@ void ABM4_coildyn(	double in_x_n[NUM_COIL_STATES],double in_xdot_nm1[6], double 
     CoilIntegrad(twist_n, nL, g, R_n, actMass, actInertia, damping,B0, muhat, mL, xdot_n);
 
     for (int i=0; i<6; i++) {
-        x_np1_hat[i]    = twist_n[i] + t_step * ( P_COEFF_N * xdot_n[i] + P_COEFF_Nm1 * xdot_nm1[i] + P_COEFF_Nm2 * xdot_nm2[i] + P_COEFF_Nm3 * xdot_nm3[i] );
+        x_np1_hat[i]    = twist_n[i] + kCoilTStep * ( P_COEFF_N * xdot_n[i] + P_COEFF_Nm1 * xdot_nm1[i] + P_COEFF_Nm2 * xdot_nm2[i] + P_COEFF_Nm3 * xdot_nm3[i] );
     }
 #ifdef ANALYTICAL_SE3_STEP
     //      calculate R_np1_hat and p_np1_hat analytically, without numerical integration
     double twist_n_pred[6];
     for (int i = 0; i < 6; i++) twist_n_pred[i] = (P_COEFF_N * twist_n[i] + P_COEFF_Nm1 * twist_nm1[i] + P_COEFF_Nm2 * twist_nm2[i] + P_COEFF_Nm3 * twist_nm3[i]);
-    DYNSE3_TimeSpace(R_n, p_n, t_step, twist_n, R_np1_hat, p_np1_hat) ;
+    DYNSE3_TimeSpace(R_n, p_n, kCoilTStep, twist_n, R_np1_hat, p_np1_hat) ;
 
 //    for (int i = 0; i < 3; ++i) x_np1_hat[i+6] = p_np1_hat[i];
 //    for (int i = 0; i < 9; ++i) x_np1_hat[i+9] = R_np1_hat[i];
@@ -338,13 +339,13 @@ void ABM4_coildyn(	double in_x_n[NUM_COIL_STATES],double in_xdot_nm1[6], double 
     CoilIntegrad(x_np1_hat, nL, g, R_np1_hat, actMass, actInertia, damping,B0, muhat, mL, xdot_np1_hat);
 
     for (int i=0; i<6; i++) {
-        out_x_np1[i]    = twist_n[i] + t_step * ( C_COEFF_Np1 * xdot_np1_hat[i] + C_COEFF_N * xdot_n[i] + C_COEFF_Nm1 * xdot_nm1[i] + C_COEFF_Nm2 * xdot_nm2[i] );
+        out_x_np1[i]    = twist_n[i] + kCoilTStep * ( C_COEFF_Np1 * xdot_np1_hat[i] + C_COEFF_N * xdot_n[i] + C_COEFF_Nm1 * xdot_nm1[i] + C_COEFF_Nm2 * xdot_nm2[i] );
     }
 #ifdef ANALYTICAL_SE3_STEP
     //      calculate R_np1 and p_np1 analytically, without numerical integration
     double twist_n_corr[6], R_x_np1[9], p_x_np1[3];
     for (int i = 0; i < 6; i++) twist_n_corr[i] = (C_COEFF_Np1 * x_np1_hat[i] + C_COEFF_N * twist_n[i] + C_COEFF_Nm1 * twist_nm1[i] + C_COEFF_Nm2 * twist_nm2[i]);
-    DYNSE3_TimeSpace(R_n, p_n, t_step, twist_n_corr, R_x_np1, p_x_np1) ;
+    DYNSE3_TimeSpace(R_n, p_n, kCoilTStep, twist_n_corr, R_x_np1, p_x_np1) ;
     for (int i = 0; i < 3; ++i) out_x_np1[i+6] = p_x_np1[i];
     for (int i = 0; i < 9; ++i) out_x_np1[i+9] = R_x_np1[i];
 #endif
@@ -486,6 +487,9 @@ void DYNNLEquation(double in_x[], double out_y[], DYNNLEqnParams& Params, double
     auto & SegBounds = Params.SegBounds;
 
     double net_mL[3], tau[3], K2invResidual[3], u_t[3], du[3];
+    for (int i = 0; i < 3; ++i) {
+        net_mL[i] = 0.0;
+    }
 //    double n_0[3] = {0,0,0}; //
 
     double tau_0[3] = {0.0,0.0,0.0};
@@ -496,6 +500,32 @@ void DYNNLEquation(double in_x[], double out_y[], DYNNLEqnParams& Params, double
 
     double p_L[3], R_L[9];
     double v1[3], v2[3], v3[3], v_val[3];
+
+    for (int i = 0; i < 3; ++i) {
+        tau[i] = 0.0;
+        K2invResidual[i] = 0.0;
+        u_t[i] = 0.0;
+        du[i] = 0.0;
+        u_tau[i] = 0.0;
+        p_[i] = 0.0;
+        u_L[i] = 0.0;
+        u_f[i] = 0.0;
+        p_f[i] = 0.0;
+        out_xdot[i] = 0.0;
+        out_xdot[i + 3] = 0.0;
+        p_L[i] = 0.0;
+        v1[i] = 0.0;
+        v2[i] = 0.0;
+        v3[i] = 0.0;
+        v_val[i] = 0.0;
+        p_t[i] = 0.0;
+    }
+    for (int i = 0; i < 9; ++i) {
+        R_t[i] = 0.0;
+        R_[i] = 0.0;
+        R_f[i] = 0.0;
+        R_L[i] = 0.0;
+    }
 
     // root configurations for residual
     double p_d[3], R_d[9];
@@ -508,6 +538,10 @@ void DYNNLEquation(double in_x[], double out_y[], DYNNLEqnParams& Params, double
 
     double RigidSegmentLength;
     double net_nL[3];  // placeholder for force applied on the flexible segment
+
+    for (int i = 0; i < 3; ++i) {
+        net_nL[i] = 0.0;
+    }
 
 
     auto &  NUM_SEGMENTS= Params.no_segments;

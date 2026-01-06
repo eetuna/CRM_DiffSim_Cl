@@ -323,7 +323,7 @@ namespace CRMCatheterModel {
 		double rho;									// Mass per length of the segment
 		double(*fcumlambda)[3];						// (NUM_FCUM_LAMBDA+1)x3 array storing cumulative external force (exluding tip force) integrated from \lambda = index * \Delta\lambda to the catheter tip (\lambda=0)
 		double* ftip;								// External point force (in spatial coordinates) applied at the tip of the catheter (\lambda = 0) (3x1 array)
-		double* g;									// Gravity vector (in spatial coordinates) (3x1 array)
+		const double* g;								// Gravity vector (in spatial coordinates) (3x1 array)
 	};
 
 

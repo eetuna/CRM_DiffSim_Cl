@@ -306,8 +306,7 @@ int true_legacy_step_backward(
     std::cerr << "DEBUG backward: J_yu sample (0,0) = " << J_yu(0, 0) << std::endl;
     std::cerr.flush();
 
-    // Step 6: Solve adjoint system: (J_yy)^T * lambda = v_y
-    Eigen::VectorXd lambda;
+    // Step 6: Precompute implicit sensitivities from J_yy.
     int rank_used = dim_y;
     double residual_norm = 0.0;
 
@@ -320,37 +319,15 @@ int true_legacy_step_backward(
     std::cerr.flush();
 
     // Use QR decomposition for stable solve
-    Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr_solver(J_yy.transpose());
-    lambda = qr_solver.solve(v_y);
+    Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr_solver(J_yy);
+    Eigen::MatrixXd S_x = qr_solver.solve(J_yx);
+    Eigen::MatrixXd S_u = qr_solver.solve(J_yu);
 
     rank_used = qr_solver.rank();
-    residual_norm = (J_yy.transpose() * lambda - v_y).norm();
-
-    // DEBUG: Print lambda
-    std::cerr << "DEBUG backward: lambda = [";
-    for (int i = 0; i < std::min(dim_y, 6); ++i) {
-        std::cerr << lambda[i] << (i < std::min(dim_y, 6)-1 ? ", " : "");
-    }
-    std::cerr << "]" << std::endl;
-    std::cerr.flush();
-
-    // SPRINT S12: Verify lambda has non-zero components in both mL and nL blocks
-    std::cerr << "\n[Lambda Diagnostics - Sprint S12]" << std::endl;
-    std::cerr << "  lambda norm: " << lambda.norm() << std::endl;
-    if (NUM_ACT_SET > 0) {
-        // Check first actuator's mL and nL components
-        double mL_norm = 0.0, nL_norm = 0.0;
-        for (int i = 0; i < 3; ++i) {
-            mL_norm += lambda[i] * lambda[i];
-            nL_norm += lambda[3 + i] * lambda[3 + i];
-        }
-        mL_norm = std::sqrt(mL_norm);
-        nL_norm = std::sqrt(nL_norm);
-        std::cerr << "  lambda[mL[0]] norm: " << mL_norm << std::endl;
-        std::cerr << "  lambda[nL[0]] norm: " << nL_norm << std::endl;
-        std::cerr << "  mL/nL coupling present: " << (mL_norm > 1e-10 && nL_norm > 1e-10 ? "YES" : "NO") << std::endl;
-    }
-    std::cerr.flush();
+    residual_norm = std::max(
+        (J_yy * S_x - J_yx).norm(),
+        (J_yy * S_u - J_yu).norm()
+    );
 
     // Step 7: Compute gradients using implicit function theorem
 
@@ -366,9 +343,9 @@ int true_legacy_step_backward(
         }
     }
 
-    // 7c. Add implicit terms: grad_x -= (J_yx)^T * lambda
+    // 7c. Add implicit terms: grad_x -= S_x^T * v_y
     // This correctly wires ∂x_{t+1}/∂x_t through the BVP implicit dependence
-    Eigen::VectorXd implicit_grad_x = J_yx.transpose() * lambda;
+    Eigen::VectorXd implicit_grad_x = S_x.transpose() * v_y;
 
     // Apply to grad_xf
     for (int i = 0; i < NUM_STATES; ++i) {
@@ -382,42 +359,7 @@ int true_legacy_step_backward(
         }
     }
 
-    std::vector<Eigen::Matrix3d> dTau_du(NUM_ACT_SET);
-    for (int j = 0; j < NUM_ACT_SET; ++j) {
-        const double* B = shooting_params.B0;
-        const double* A = shooting_params.CoilAlignmentTurnAreaMatrix[j];
-        dTau_du[j].setZero();
-        for (int i = 0; i < 3; ++i) {
-            double dM[3] = {A[0 * 3 + i], A[1 * 3 + i], A[2 * 3 + i]};
-            dTau_du[j](0, i) = dM[1] * B[2] - dM[2] * B[1];
-            dTau_du[j](1, i) = dM[2] * B[0] - dM[0] * B[2];
-            dTau_du[j](2, i) = dM[0] * B[1] - dM[1] * B[0];
-        }
-    }
-
-    Eigen::VectorXd grad_u_direct = Eigen::VectorXd::Zero(NUM_ACT_SET * 3);
-    double dt = fwd_result.dt;
-
-    for (int j = 0; j < NUM_ACT_SET; ++j) {
-        const double* actInertia = shooting_params.actInertia[j];
-        double I_xx = actInertia[0];
-        double I_yy = actInertia[4];
-        double I_zz = actInertia[8];
-
-        double v_w[3];
-        for (int k = 0; k < 3; ++k) {
-            v_w[k] = grad_x_coil[j][3 + k];
-        }
-
-        for (int i = 0; i < 3; ++i) {
-            grad_u_direct[j * 3 + i] += dt * dTau_du[j](0, i) / I_xx * v_w[0];
-            grad_u_direct[j * 3 + i] += dt * dTau_du[j](1, i) / I_yy * v_w[1];
-            grad_u_direct[j * 3 + i] += dt * dTau_du[j](2, i) / I_zz * v_w[2];
-        }
-    }
-
-    Eigen::VectorXd grad_u_implicit = -J_yu.transpose() * lambda;
-    Eigen::VectorXd grad_u_vec = grad_u_direct + grad_u_implicit;
+    Eigen::VectorXd grad_u_vec = -S_u.transpose() * v_y;
 
     for (int j = 0; j < NUM_ACT_SET; ++j) {
         for (int i = 0; i < 3; ++i) {
@@ -536,13 +478,17 @@ int true_legacy_step_backward_batched(
         J_yy, J_yu, J_yx
     );
 
-    // Step 3: Factorize (J_yy)^T once
-    Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr_solver(J_yy.transpose());
+    // Step 3: Factorize J_yy once and precompute sensitivities
+    Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr_solver(J_yy);
+    Eigen::MatrixXd S_x = qr_solver.solve(J_yx);
+    Eigen::MatrixXd S_u = qr_solver.solve(J_yu);
     int rank_used = qr_solver.rank();
 
-    // Step 4: Loop over RHS and solve
-    const int dim_y = NUM_ACT_SET * 6;
-    double max_residual = 0.0;
+    // Step 4: Loop over RHS and apply v_y
+    double max_residual = std::max(
+        (J_yy * S_x - J_yx).norm(),
+        (J_yy * S_u - J_yu).norm()
+    );
 
     for (int rhs_idx = 0; rhs_idx < num_rhs; ++rhs_idx) {
         // Extract grad_tip_p for this RHS
@@ -555,31 +501,6 @@ int true_legacy_step_backward_batched(
         }
 
         Eigen::VectorXd v_y = J_xf_y.transpose() * v_xf_next;
-
-        // Solve adjoint system: (J_yy)^T * lambda = v_y (using pre-factored QR)
-        Eigen::VectorXd lambda = qr_solver.solve(v_y);
-
-        double residual_norm = (J_yy.transpose() * lambda - v_y).norm();
-        max_residual = std::max(max_residual, residual_norm);
-
-        // SPRINT S12: Verify lambda has non-zero components in both mL and nL blocks
-        if (rhs_idx == 0) {  // Only print for first RHS to avoid spam
-            std::cerr << "\n[Lambda Diagnostics - Sprint S12 - Batched]" << std::endl;
-            std::cerr << "  lambda norm: " << lambda.norm() << std::endl;
-            if (NUM_ACT_SET > 0) {
-                double mL_norm = 0.0, nL_norm = 0.0;
-                for (int i = 0; i < 3; ++i) {
-                    mL_norm += lambda[i] * lambda[i];
-                    nL_norm += lambda[3 + i] * lambda[3 + i];
-                }
-                mL_norm = std::sqrt(mL_norm);
-                nL_norm = std::sqrt(nL_norm);
-                std::cerr << "  lambda[mL[0]] norm: " << mL_norm << std::endl;
-                std::cerr << "  lambda[nL[0]] norm: " << nL_norm << std::endl;
-                std::cerr << "  mL/nL coupling present: " << (mL_norm > 1e-10 && nL_norm > 1e-10 ? "YES" : "NO") << std::endl;
-            }
-            std::cerr.flush();
-        }
 
         Eigen::VectorXd grad_x_direct = J_xf_x.transpose() * v_xf_next;
         const int dim_xcoil = NUM_ACT_SET * 18;
@@ -596,8 +517,8 @@ int true_legacy_step_backward_batched(
             }
         }
 
-        // Implicit state term: grad_x -= (J_yx)^T * lambda
-        Eigen::VectorXd implicit_grad_x = J_yx.transpose() * lambda;
+        // Implicit state term: grad_x -= S_x^T * v_y
+        Eigen::VectorXd implicit_grad_x = S_x.transpose() * v_y;
         for (int i = 0; i < NUM_STATES; ++i) {
             grad_xf[i] -= implicit_grad_x[NUM_ACT_SET * 18 + i];
         }
@@ -607,51 +528,7 @@ int true_legacy_step_backward_batched(
             }
         }
 
-        // grad_u: Direct (magnetic torque) + Implicit (BVP adjoint)
-
-        // Compute magnetic torque derivatives (full turn-area matrix)
-        std::vector<Eigen::Matrix3d> dTau_du(NUM_ACT_SET);
-        for (int j = 0; j < NUM_ACT_SET; ++j) {
-            const double* B = shooting_params.B0;
-            const double* A = shooting_params.CoilAlignmentTurnAreaMatrix[j];
-            dTau_du[j].setZero();
-            for (int i = 0; i < 3; ++i) {
-                double dM[3] = {A[0 * 3 + i], A[1 * 3 + i], A[2 * 3 + i]};
-                dTau_du[j](0, i) = dM[1] * B[2] - dM[2] * B[1];
-                dTau_du[j](1, i) = dM[2] * B[0] - dM[0] * B[2];
-                dTau_du[j](2, i) = dM[0] * B[1] - dM[1] * B[0];
-            }
-        }
-
-        // Compute direct contribution from angular velocities
-        Eigen::VectorXd grad_u_direct = Eigen::VectorXd::Zero(NUM_ACT_SET * 3);
-        double dt = fwd_result.dt;
-
-        for (int j = 0; j < NUM_ACT_SET; ++j) {
-            const double* actInertia = shooting_params.actInertia[j];
-            double I_xx = actInertia[0];
-            double I_yy = actInertia[4];
-            double I_zz = actInertia[8];
-
-            // Extract upstream gradient on w_next (indices 3-5)
-            double v_w[3];
-            for (int k = 0; k < 3; ++k) {
-                v_w[k] = grad_x_coil_flat[j * 18 + 3 + k];
-            }
-
-            // grad_u_direct += (∂w_next/∂u)^T * v_w
-            for (int i = 0; i < 3; ++i) {
-                grad_u_direct[j * 3 + i] += dt * dTau_du[j](0, i) / I_xx * v_w[0];
-                grad_u_direct[j * 3 + i] += dt * dTau_du[j](1, i) / I_yy * v_w[1];
-                grad_u_direct[j * 3 + i] += dt * dTau_du[j](2, i) / I_zz * v_w[2];
-            }
-        }
-
-        // Add implicit contribution from BVP adjoint
-        Eigen::VectorXd grad_u_implicit = -J_yu.transpose() * lambda;
-
-        // Combine direct and implicit gradients
-        Eigen::VectorXd grad_u_vec = grad_u_direct + grad_u_implicit;
+        Eigen::VectorXd grad_u_vec = -S_u.transpose() * v_y;
 
         double* grad_u_flat = grad_u_batch + rhs_idx * NUM_ACT_SET * 3;
         for (int j = 0; j < NUM_ACT_SET; ++j) {
@@ -857,16 +734,7 @@ int true_legacy_linearize_implicit(
     // - ∂R_next/∂u = 0 (rotation doesn't directly depend on u in first order)
     // The indirect pathway through BVP is captured by G_y * S_u term
 
-    // G_y construction: ∂x_next/∂y where y = [mL; nL]
-    // Tip state depends on nL through IVP (from J_n)
-    for (int i = 0; i < NUM_STATES; ++i) {
-        for (int j = 0; j < NUM_ACT_SET; ++j) {
-            for (int k = 0; k < 3; ++k) {
-                // nL components are at indices [j*6+3 : j*6+6) in y-vector
-                G_y(tip_offset + i, j * 6 + 3 + k) = J_n(i, j * 3 + k);
-            }
-        }
-    }
+    // G_y already populated from IVP Jacobians (J_xcoil_y, J_xf_y).
 
     // Step 6: Apply implicit function theorem
     // A = G_x - G_y * S_x
