@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CRM_MatrixOperations_Templates.hpp"
+#include "CoilDynamics_Defs_Templates.hpp"
 
 //
 //
@@ -170,24 +171,48 @@ namespace CRMCatheterModel {
         // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l); % udot
         //
         //   e3hat*R' = [ -r12 -r22 -r32; r11 r21 r31; 0 0 0];
-        double e3hatRT[9];
+        T e3hatRT[9];
         e3hatRT[0] = -R[1];   e3hatRT[1] = -R[4];   e3hatRT[2] = -R[7];
         e3hatRT[3] = R[0];    e3hatRT[4] = R[3];    e3hatRT[5] = R[6];
-        e3hatRT[6] = 0.0;     e3hatRT[7] = 0.0;     e3hatRT[8] = 0.0;
+        e3hatRT[6] = T(0.0);  e3hatRT[7] = T(0.0);  e3hatRT[8] = T(0.0);
         T e3hatRTfcum[3];
         mMult_AB_T<T, 3, 3, 1>(e3hatRT, fcum, e3hatRTfcum);  // e3m*R'*intf
         T RTl[3];
-        mMult_ATB_T<T, 3, 3, 1>(R, l, RTl);  // R'*l
+        // R is double? No, R is T in StateVector_T<T>.
+        // Wait, StateVector_T definition: T _R[9].
+        // So R is T. l is double*.
+        // We need mMult_ATB_T<T, ...> that handles T and double.
+        // Or cast l to T.
+        T l_T[3] = {T(l[0]), T(l[1]), T(l[2])};
+        mMult_ATB_T<T, 3, 3, 1>(R, l_T, RTl);  // R'*l
+        
         T umustar[3];
-        mSub_AB_T<T, 3, 1>(u, ustar, umustar);  // (u-ustar_s)
+        T ustar_T[3] = {T(ustar[0]), T(ustar[1]), T(ustar[2])};
+        mSub_AB_T<T, 3, 1>(u, ustar_T, umustar);  // (u-ustar_s)
+        
         T Kumustar[3], uhatKumustar[3];
-        mMult_AB_T<T, 3, 3, 1>(K, umustar, Kumustar);
+        T K_T[9]; for(int i=0;i<9;++i) K_T[i] = T(K[i]);
+        
+        mMult_AB_T<T, 3, 3, 1>(K_T, umustar, Kumustar);
         mMult_AB_T<T, 3, 3, 1>(u_hat, Kumustar, uhatKumustar);  //(um*K+Kdot)*(u-ustar_s) assuming Kdot=0
+        
         T sumterm[3];
         mAdd_ABC_T<T, 3, 1>(uhatKumustar, e3hatRTfcum, RTl, sumterm);  // ((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
+        
         T KinvSum[3];
-        mMult_AB_T<T, 3, 3, 1>(Kinv, sumterm, KinvSum);  // Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
-        mSub_AB_T<T, 3, 1>(ustardot, KinvSum, udot);  // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l);
+        T Kinv_T[9]; for(int i=0;i<9;++i) Kinv_T[i] = T(Kinv[i]);
+        mMult_AB_T<T, 3, 3, 1>(Kinv_T, sumterm, KinvSum);  // Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
+        
+        T ustardot_T[3] = {T(ustardot[0]), T(ustardot[1]), T(ustardot[2])};
+        mSub_AB_T<T, 3, 1>(ustardot_T, KinvSum, udot);  // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l);
+    }
+
+    // Overload for StateVector_T to bridge RK2_step_dyn/ABM4_step_dyn to CRMIntegrand_dyn_T
+    template<typename T>
+    void CRMIntegrand_dyn(double s, const StateVector_T<T>& in_x, const CRMIntegrandParams in_Params, const double in_nL[3],
+                      StateDerivativeVector_T<T>& out_xdot) {
+        T nL_T[3] = {T(in_nL[0]), T(in_nL[1]), T(in_nL[2])};
+        CRMIntegrand_dyn_T(s, in_x, in_Params, nL_T, out_xdot);
     }
 
 
@@ -298,6 +323,7 @@ namespace CRMCatheterModel {
 
         using _SVT = StVecType;
         using _DVT = StDerivativeVectType<StVecType>;
+        using T = typename std::decay<decltype(in_x_n._u[0])>::type;
 
         const double P_COEFF_N = 55.0 / 24.0, P_COEFF_Nm1 = -59.0 / 24.0, P_COEFF_Nm2 = 37.0 / 24.0, P_COEFF_Nm3 = -9.0 / 24.0;  // AB4 Predictor Coefficients
         const double C_COEFF_Np1 = 9.0 / 24.0, C_COEFF_N = 19.0 / 24.0, C_COEFF_Nm1 = -5.0 / 24.0, C_COEFF_Nm2 = 1.0 / 24.0;     // AM4 Corrector Coefficients
@@ -318,18 +344,18 @@ namespace CRMCatheterModel {
         x_np1_hat = x_n + h * (P_COEFF_N * xdot_n + P_COEFF_Nm1 * xdot_nm1 + P_COEFF_Nm2 * xdot_nm2 + P_COEFF_Nm3 * xdot_nm3);
 #ifdef ANALYTICAL_SE3_STEP
         //      calculate R_np1_hat and p_np1_hat analytically, without numerical integration
-		double u_n_pred[3];
+		T u_n_pred[3];
 		for (int i = 0; i < 3; i++) u_n_pred[i] = (P_COEFF_N * x_n._u[i] + P_COEFF_Nm1 * x_nm1._u[i] + P_COEFF_Nm2 * x_nm2._u[i] + P_COEFF_Nm3 * x_nm3._u[i]);
-		SE3_Analytical_Step(x_n._R, x_n._p, u_n_pred, h, x_np1_hat._R /*R_np1_hat*/, x_np1_hat._p /*p_np1_hat*/);
+		SE3_Analytical_Step_T<T>(x_n._R, x_n._p, u_n_pred, h, x_np1_hat._R /*R_np1_hat*/, x_np1_hat._p /*p_np1_hat*/);
 #endif
         //ABM4_STEP_STEP2:
         CRMIntegrand_dyn(t_n + h, x_np1_hat, in_Params, in_nL, xdot_np1_hat);
         out_x_np1 = x_n + h * (C_COEFF_Np1 * xdot_np1_hat + C_COEFF_N * xdot_n + C_COEFF_Nm1 * xdot_nm1 + C_COEFF_Nm2 * xdot_nm2);
 #ifdef ANALYTICAL_SE3_STEP
         //      calculate R_np1 and p_np1 analytically, without numerical integration
-		double u_n_corr[3];
+		T u_n_corr[3];
 		for (int i = 0; i < 3; i++) u_n_corr[i] = (C_COEFF_Np1 * x_np1_hat._u[i] + C_COEFF_N * x_n._u[i] + C_COEFF_Nm1 * x_nm1._u[i] + C_COEFF_Nm2 * x_nm2._u[i]);
-		SE3_Analytical_Step(x_n._R, x_n._p, u_n_corr, h, out_x_np1._R /*R_np1*/, out_x_np1._p /*p_np1*/);
+		SE3_Analytical_Step_T<T>(x_n._R, x_n._p, u_n_corr, h, out_x_np1._R /*R_np1*/, out_x_np1._p /*p_np1*/);
 #endif
 
     }
@@ -343,6 +369,7 @@ namespace CRMCatheterModel {
 
         using _SVT = StVecType;
         using _DVT = StDerivativeVectType<StVecType>;
+        using T = typename std::decay<decltype(in_x_n._u[0])>::type;
 
         _SVT x_n(in_x_n);       // from input
         _DVT k1;				// intermediate
@@ -356,7 +383,7 @@ namespace CRMCatheterModel {
         x_n_p_k1o2 = x_n + k1 * 0.5;
 #ifdef ANALYTICAL_SE3_STEP
         // we will calculate R_n_p_k1o2 and p_n_p_k1o2 analytically, without numerical integration
-		SE3_Analytical_Step(x_n._R, x_n._p, x_n._u, h * 0.5, x_n_p_k1o2._R, x_n_p_k1o2._p);
+		SE3_Analytical_Step_T<T>(x_n._R, x_n._p, x_n._u, h * 0.5, x_n_p_k1o2._R, x_n_p_k1o2._p);
 #endif
 
         //RK2_STEP_STEP2:
@@ -364,7 +391,7 @@ namespace CRMCatheterModel {
         out_x_np1 = x_n + h * k2oh;
 #ifdef ANALYTICAL_SE3_STEP
         // we will calculate R_np1 and p_np1 analytically, without numerical integration
-		SE3_Analytical_Step(x_n._R, x_n._p, x_n_p_k1o2._u/*u_np1half*/, h, out_x_np1._R, out_x_np1._p);
+		SE3_Analytical_Step_T<T>(x_n._R, x_n._p, x_n_p_k1o2._u/*u_np1half*/, h, out_x_np1._R, out_x_np1._p);
 #endif
 
     }

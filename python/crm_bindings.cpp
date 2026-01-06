@@ -541,10 +541,22 @@ py::dict py_true_legacy_step_forward(
     double out_coil_state[NUM_ACT_SET][NUM_COIL_STATES];
     double out_markers[10][3];  // Placeholder, actual size depends on config
 
-    // Call DYNSolverIVP
-    DYNSolverIVP(params, out_u0, out_mL, out_nL, out_tau, out_ftip,
-                 true,  // FinalValueOnly
-                 out_xf, out_coil_state, out_markers);
+    if (out_localmin != 0) {
+        // BVP Convergence Failed: Return previous state (reject step)
+        for (int i = 0; i < NUM_STATES; ++i) {
+            out_xf[i] = xf_data[i];
+        }
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int k = 0; k < NUM_COIL_STATES; ++k) {
+                out_coil_state[j][k] = x_coil_data[j * 18 + k];
+            }
+        }
+    } else {
+        // Call DYNSolverIVP
+        DYNSolverIVP(params, out_u0, out_mL, out_nL, out_tau, out_ftip,
+                     true,  // FinalValueOnly
+                     out_xf, out_coil_state, out_markers);
+    }
 
     // Package results
     py::dict result;

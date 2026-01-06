@@ -443,7 +443,7 @@ namespace CRMCatheterModel {
 	class StateVector_T {
 	public:
 		T _p[3];       // position
-		double _R[9];  // rotation (stays double - integrated analytically)
+		T _R[9];       // rotation (now T to support Dual derivatives)
 		T _u[3];       // curvature
 
 		StateVector_T() {
@@ -452,7 +452,7 @@ namespace CRMCatheterModel {
 				_u[i] = T(0.0);
 			}
 			for (int i = 0; i < 9; ++i) {
-				_R[i] = 0.0;
+				_R[i] = T(0.0);
 			}
 		}
 

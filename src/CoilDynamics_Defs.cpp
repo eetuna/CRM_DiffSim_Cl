@@ -8,6 +8,7 @@
 #include "CRM_BVPIVP_APIDeclarations.hpp"
 #include "CRM.hpp"
 #include "CRMDYN_Numerical_Integration.hpp"
+#include "CoilDynamics_Defs_Templates2.hpp"
 
  /**
 

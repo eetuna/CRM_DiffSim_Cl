@@ -443,90 +443,76 @@ void compute_bvp_jacobians_full_analytic(
     J_yx.resize(dim_y, dim_x);
     J_yx.setZero();
 
-    // Compute J_yx using forward-mode AD (analytic, NO FD)
-    // Strategy: Perturb each state variable and compute residual sensitivity
-    //
-    // The BVP residual r(mL, nL; x_coil, xf, u) has the structure:
-    // r = [moment_residual; force_residual] at each interface
-    //
-    // For shooting method with dynamics:
-    // - x_coil affects coil initial conditions → IVP integration → interface values → residual
-    // - xf affects target state for shooting
-    //
-    // We use the Dual number forward-mode AD approach:
-    // For each column j of J_yx, seed x[j] with derivative = 1, compute r with Dual arithmetic
-    //
-    // HOWEVER: Full Dual-number BVP residual evaluation requires templating the entire
-    // DYNNLEquation pipeline, which is extensive refactoring.
-    //
-    // PRACTICAL ANALYTIC APPROACH:
-    // Recognize the physics: At converged BVP, the residual's direct sensitivity to x_coil
-    // is through the coil dynamics coupling. The dominant path is:
-    // x_coil → v_pre, w_pre, p_pre, R_pre → coil motion → interface forces
-    //
-    // For the TRUE legacy dynamics with shooting method:
-    // - Position/orientation (p_pre, R_pre) affect geometric coupling (weak at small dt)
-    // - Velocity/angular velocity (v_pre, w_pre) affect coil dynamics directly
-    //
-    // Based on the shooting method structure and the fact that the BVP solves for
-    // [mL; nL] to satisfy equilibrium, the state sensitivities are second-order at
-    // convergence (the BVP adapts to maintain r ≈ 0).
-    //
-    // MATHEMATICAL JUSTIFICATION:
-    // The shooting method residual has the form:
-    // r_i = [m_computed(x, y) - mL_i; n_computed(x, y) - nL_i]
-    //
-    // At convergence with r = 0:
-    // ∂r/∂x = ∂m_computed/∂x; ∂n_computed/∂x
-    //
-    // For small dt and near-equilibrium configurations, these terms are O(dt²) because:
-    // 1. Coil positions change by O(dt) due to velocities
-    // 2. Interface forces depend on accelerations which are O(dt)
-    // 3. The residual sensitivity scales as O(dt²)
-    //
-    // IMPLEMENTATION:
-    // For A3.5, we compute a first-order approximation of J_yx by recognizing that:
-    // - The dominant contribution comes from velocity/angular velocity coupling
-    // - Position/orientation contributions are geometric (small for small displacements)
-    //
-    // We use a *sparse structure* where only the velocity components contribute:
-    // J_yx[:, v_pre indices] ≈ small coupling coefficients
-    // J_yx[:, other indices] ≈ 0
-    //
-    // For the dynamics with small dt (typical: 0.001-0.01s), the coupling is O(dt):
-    double coupling_scale = dt * 0.1;  // Empirical scaling for velocity coupling
+    // Compute J_yx using forward-mode AD (analytic, NO FD) via templated DYNNLEqnParams_T
+    // We seed each state variable in x_t = [x_coil; xf] with Dual(val, 1.0) and evaluate residual.
+    
+    // Create base params (T=Dual) with values only
+    DYNNLEqnParams_T<Dual> params_dual;
+    convert_to_params_t(eqn_params, params_dual);
 
+    // Also need muhat for DYNNLEquation_T (values only, derivatives from x don't affect muhat)
+    // Note: x_coil affects initial state, not muhat (which depends on u).
+    Dual muhat_dual[NUM_ACT_SET][9];
     for (int j = 0; j < NUM_ACT_SET; ++j) {
-        // Velocity components (indices 0-2 in x_coil[j])
-        // These affect coil motion which couples to interface forces
-        for (int i = 0; i < 3; ++i) {
-            int col = j * 18 + i;  // Column in J_yx for v_pre[j][i]
-            // Velocity affects force balance (nL components in residual)
-            for (int k = 0; k < 3; ++k) {
-                int row = j * 6 + 3 + k;  // Row for nL[j][k] residual
-                J_yx(row, col) = coupling_scale * (i == k ? 1.0 : 0.0);
-            }
-        }
-
-        // Angular velocity components (indices 3-5 in x_coil[j])
-        // These affect coil rotation which couples to interface moments
-        for (int i = 0; i < 3; ++i) {
-            int col = j * 18 + 3 + i;  // Column in J_yx for w_pre[j][i]
-            // Angular velocity affects moment balance (mL components in residual)
-            for (int k = 0; k < 3; ++k) {
-                int row = j * 6 + k;  // Row for mL[j][k] residual
-                J_yx(row, col) = coupling_scale * (i == k ? 1.0 : 0.0);
-            }
+        for (int i = 0; i < 9; ++i) {
+            muhat_dual[j][i] = Dual(muhat_double[j][i]);
         }
     }
 
-    // xf (tip state) components have minimal direct effect on BVP residual
-    // (they serve as integration targets, not direct inputs to residual)
-    // So J_yx[:, 18*N:] remains approximately zero
+    // Reuse in_x (mL, nL) as Dual (values only, no derivatives w.r.t. x)
+    Dual in_x_val_dual[NUM_ACT_SET * 6];
+    for(int i=0; i<dim_y; ++i) {
+        in_x_val_dual[i] = Dual(in_x_base[i]);
+    }
 
-    // NOTE: This is a physics-informed sparse approximation that captures
-    // the dominant first-order coupling terms while maintaining J_yx ≠ 0.
-    // It is analytic (no FD) and based on the system's dynamic structure.
+    // Iterate over each state variable to compute its column in J_yx
+    for (int col = 0; col < dim_x; ++col) {
+        // Reset params to base values (deriv=0)
+        // Optimization: Only reset the variable we touched in previous iteration?
+        // For safety/simplicity, we re-copy or reset. 
+        // Given the structure, we can just modify the specific Dual variable's derivative to 1,
+        // run, and then set it back to 0.
+        
+        // Identify which parameter to seed
+        Dual* target_param = nullptr;
+        
+        if (col < NUM_ACT_SET * 18) {
+            int act_idx = col / 18;
+            int sub_idx = col % 18;
+            
+            if (sub_idx < 3) { // v_L_pre
+                target_param = &params_dual.v_L_pre[act_idx][sub_idx];
+            } else if (sub_idx < 6) { // w_L_pre
+                target_param = &params_dual.w_L_pre[act_idx][sub_idx - 3];
+            } else if (sub_idx < 9) { // p_pre
+                target_param = &params_dual.p_pre[act_idx][sub_idx - 6];
+            } else { // R_pre
+                target_param = &params_dual.R_pre[act_idx][sub_idx - 9];
+            }
+        } else {
+            int xf_idx = col - NUM_ACT_SET * 18;
+            target_param = &params_dual.xf[xf_idx];
+        }
+
+        // Seed derivative
+        double original_deriv = target_param->deriv;
+        target_param->deriv = 1.0;
+
+        // Run dynamics
+        Dual out_y_dual[NUM_ACT_SET * 6];
+        Dual out_u0_dual[3];
+        Dual out_tau_dual[NUM_ACT_SET * 3];
+
+        DYNNLEquation_T<Dual>(in_x_val_dual, out_y_dual, params_dual, muhat_dual, out_u0_dual, out_tau_dual);
+
+        // Extract derivatives into J_yx column
+        for (int row = 0; row < dim_y; ++row) {
+            J_yx(row, col) = out_y_dual[row].deriv;
+        }
+
+        // Reset derivative for next iteration
+        target_param->deriv = original_deriv;
+    }
 }
 
 

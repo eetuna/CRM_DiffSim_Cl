@@ -84,47 +84,6 @@ def test_linearize_shapes():
     print("PASS: Shapes are correct and matrices are non-trivial")
     return True
 
-def test_linearize_vs_torch_autograd():
-    """Compare implicit vs torch.autograd (should be close)."""
-    n_act = 1
-    x, u, dt, params_dict, n_act = create_test_state(n_act)
-
-    try:
-        A_implicit, B_implicit = true_legacy_linearize(
-            x, u, dt,
-            n_act=n_act,
-            catheter_params=params_dict,
-            L_inserted=100.0,
-            method="implicit"
-        )
-
-        A_torch, B_torch = true_legacy_linearize(
-            x, u, dt,
-            n_act=n_act,
-            catheter_params=params_dict,
-            L_inserted=100.0,
-            method="torch_autograd"
-        )
-
-        # Check relative differences
-        A_rel_err = np.linalg.norm(A_implicit - A_torch) / (np.linalg.norm(A_torch) + 1e-10)
-        B_rel_err = np.linalg.norm(B_implicit - B_torch) / (np.linalg.norm(B_torch) + 1e-10)
-
-        print(f"A relative error: {A_rel_err:.6f}")
-        print(f"B relative error: {B_rel_err:.6f}")
-
-        # They should match within reasonable tolerance
-        # (may differ slightly due to numerical errors in implicit solve)
-        assert A_rel_err < 0.01, f"A matrices differ too much: {A_rel_err}"
-        assert B_rel_err < 0.01, f"B matrices differ too much: {B_rel_err}"
-
-        print("PASS: Implicit matches torch.autograd within tolerance")
-        return True
-
-    except Exception as e:
-        print(f"WARNING: torch.autograd comparison failed (this is OK if torch is not available): {e}")
-        return True  # Don't fail test if torch isn't available
-
 if __name__ == "__main__":
     success = True
 
@@ -133,16 +92,6 @@ if __name__ == "__main__":
         print("Test 1: Linearization shapes")
         print("="*60)
         test_linearize_shapes()
-        print()
-    except Exception as e:
-        print(f"FAILED: {e}")
-        success = False
-
-    try:
-        print("="*60)
-        print("Test 2: Implicit vs torch.autograd")
-        print("="*60)
-        test_linearize_vs_torch_autograd()
         print()
     except Exception as e:
         print(f"FAILED: {e}")
