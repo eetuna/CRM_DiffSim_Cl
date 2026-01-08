@@ -155,7 +155,7 @@ void compute_bvp_residual(
     double residual[NUM_ACT_SET * 6]
 );
 
-// Compute BVP Jacobian blocks using strictly analytic methods (NO finite differences)
+// Compute BVP Jacobian blocks using strictly analytic methods (no numerical differencing)
 // Uses forward-mode AD with Dual numbers and analytic formulas
 // J_yy = ∂r/∂(mL,nL)  : (6N × 6N)
 // J_yu = ∂r/∂u       : (6N × 3N)

@@ -141,6 +141,16 @@ class HybridController:
                 - 'tracking_error': float (if available)
         """
         self.step_count += 1
+        if x_t.shape != (self.state_dim,):
+            raise ValueError(
+                f"x_t must have shape ({self.state_dim},), got {x_t.shape}"
+            )
+        if p_tip_t.shape != (3,):
+            raise ValueError(f"p_tip_t must have shape (3,), got {p_tip_t.shape}")
+        if p_ref_horizon.ndim != 2 or p_ref_horizon.shape[1] != 3:
+            raise ValueError(
+                f"p_ref_horizon must have shape (H, 3), got {p_ref_horizon.shape}"
+            )
 
         # Use provided hiddens or internal state
         if hiddens is None:
@@ -207,11 +217,13 @@ class HybridController:
             # Try the control and check if it's safe
             x_coil_t, xf_t = unpack_true_legacy_state(x_t, self.n_act)
             result = crm_diff_py.true_legacy_step_forward(
-                x_coil_t, xf_t, u_t, self.dt, self.params_dict
+                x_coil_t, xf_t, u_t.reshape(self.n_act, 3), self.dt, self.params_dict
             )
 
-            status = result['status']
-            dynamics_safe = (status == 0)
+            if 'status' in result:
+                dynamics_safe = (result['status'] == 0)
+            else:
+                dynamics_safe = bool(result.get('converged', False))
 
             # Check tracking error
             if dynamics_safe:

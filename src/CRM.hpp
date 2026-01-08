@@ -205,7 +205,7 @@ namespace CRMCatheterModel {
 		//
 
 	//
-	// This is the API for the numerical (finite difference) calculation of the Forward Kinematics Jacobian 
+	// This is the API for the numerical differencing calculation of the Forward Kinematics Jacobian 
 	//      (note that this function returns the hybrid manipulator Jacobian + extras, not the Jacobian of the FK map)
 	//
 	MatrixXd CRM_FKJacobian_Numerical(

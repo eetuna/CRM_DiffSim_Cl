@@ -149,12 +149,23 @@ void CoilDynamics( double in_coil_state[NUM_COIL_STATES], double in_n[3], double
     for (int i = 0; i < NUM_COIL_STATES; i++) {
             x_n[i] = in_coil_state[i];
     }
+    for (int i = 0; i < NUM_COIL_STATES; i++) {
+        x_nm1[i] = x_n[i];
+        x_nm2[i] = x_n[i];
+        x_nm3[i] = x_n[i];
+        x_np1[i] = x_n[i];
+    }
+    for (int i = 0; i < 6; i++) {
+        xdot_nm1[i] = 0.0;
+        xdot_nm2[i] = 0.0;
+        xdot_nm3[i] = 0.0;
+        xdot_n[i] = 0.0;
+    }
 
 
     int N = ceil(DELTA_T / kCoilTStep);
 
     for (int idx=0; idx<N; idx++) {
-
         if (idx<3) {  // RK2 initialization steps
             RK2_coildyn(x_n, nL, g,  actMass, actInertia, damping, B0, muhat, mL, x_np1, xdot_n );
         }
@@ -328,9 +339,7 @@ void ABM4_coildyn(	double in_x_n[NUM_COIL_STATES],double in_xdot_nm1[6], double 
     }
 #ifdef ANALYTICAL_SE3_STEP
     //      calculate R_np1_hat and p_np1_hat analytically, without numerical integration
-    double twist_n_pred[6];
-    for (int i = 0; i < 6; i++) twist_n_pred[i] = (P_COEFF_N * twist_n[i] + P_COEFF_Nm1 * twist_nm1[i] + P_COEFF_Nm2 * twist_nm2[i] + P_COEFF_Nm3 * twist_nm3[i]);
-    DYNSE3_TimeSpace(R_n, p_n, kCoilTStep, twist_n, R_np1_hat, p_np1_hat) ;
+    DYNSE3_TimeSpace(R_n, p_n, kCoilTStep, x_np1_hat, R_np1_hat, p_np1_hat);
 
 //    for (int i = 0; i < 3; ++i) x_np1_hat[i+6] = p_np1_hat[i];
 //    for (int i = 0; i < 9; ++i) x_np1_hat[i+9] = R_np1_hat[i];
@@ -1367,6 +1376,14 @@ void DYNSolverIVP_JacobiansFullstate(
 
         Dual out_xf_next[NUM_STATES];
         Dual out_x_coil_next[NUM_ACT_SET][NUM_COIL_STATES];
+        for (int i = 0; i < NUM_STATES; ++i) {
+            out_xf_next[i] = Dual(0.0, 0.0);
+        }
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < NUM_COIL_STATES; ++i) {
+                out_x_coil_next[j][i] = Dual(0.0, 0.0);
+            }
+        }
 
         DYNSolverIVP_T<Dual>(in_Params, u0_dual, mL_dual, nL_dual, tau_dual, ftip_dual,
                              x_coil_base, out_xf_next, out_x_coil_next);
@@ -1415,6 +1432,14 @@ void DYNSolverIVP_JacobiansFullstate(
 
         Dual out_xf_next[NUM_STATES];
         Dual out_x_coil_next[NUM_ACT_SET][NUM_COIL_STATES];
+        for (int i = 0; i < NUM_STATES; ++i) {
+            out_xf_next[i] = Dual(0.0, 0.0);
+        }
+        for (int j = 0; j < NUM_ACT_SET; ++j) {
+            for (int i = 0; i < NUM_COIL_STATES; ++i) {
+                out_x_coil_next[j][i] = Dual(0.0, 0.0);
+            }
+        }
 
         DYNSolverIVP_T<Dual>(in_Params, u0_dual, mL_dual, nL_dual, tau_dual, ftip_dual,
                              x_coil_dual, out_xf_next, out_x_coil_next);

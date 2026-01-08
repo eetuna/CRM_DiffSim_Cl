@@ -27,10 +27,6 @@ from .true_legacy_step import (
     true_legacy_linearize,
     true_legacy_tip_jacobian,
 )
-from .true_legacy_step_autograd import (
-    true_legacy_step_torch,
-    TrueLegacyStepFn,
-)
 
 
 def STATE_DIM_FULL(n_act):
@@ -52,10 +48,8 @@ __all__ = [
     'pack_true_legacy_state', 'unpack_true_legacy_state',
     'pack_true_legacy_warmstart', 'unpack_true_legacy_warmstart',
     'true_legacy_step',
-    'true_legacy_step_torch',
     'true_legacy_linearize',
     'true_legacy_tip_jacobian',
-    'TrueLegacyStepFn',
     'STATE_DIM_FULL',
 ]
 

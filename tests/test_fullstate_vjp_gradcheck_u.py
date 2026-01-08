@@ -1,10 +1,16 @@
 """
-Test FULLSTATE VJP gradient correctness for control inputs without finite differences.
+Test FULLSTATE VJP gradient correctness for control inputs without numerical differencing.
 """
 
+import os
 import sys
-sys.path.insert(0, '/workspaces/CRM_DiffSim_Cl/build')
-sys.path.insert(0, '/workspaces/CRM_DiffSim_Cl/python')
+
+repo_root = os.path.join(os.path.dirname(__file__), '..')
+build_dir = os.path.join(repo_root, 'build_s15')
+if not os.path.isdir(build_dir):
+    build_dir = os.path.join(repo_root, 'build')
+sys.path.insert(0, build_dir)
+sys.path.insert(0, os.path.join(repo_root, 'python'))
 
 import numpy as np
 import crm_diff_py
@@ -13,18 +19,6 @@ from control.true_legacy_step import true_legacy_linearize
 
 def create_test_state(n_act=1):
     """Create a simple test state."""
-    x_coil = np.zeros((n_act, 18))
-    x_coil[:, 6:9] = [[0.0, 0.0, 0.0]]
-    x_coil[:, 9:18] = np.eye(3).flatten()
-
-    xf = np.zeros(15)
-    xf[0:3] = [0.0, 0.0, 100.0]
-    xf[3:12] = np.eye(3).flatten()
-
-    x = pack_true_legacy_state(x_coil, xf)
-
-    u = np.array([[0.1, 0.05, -0.05]] * n_act)
-
     params = crm_diff_py.load_cath_params('./catheterdata/CatheterParameterSet_1_dyn.txt')
     config = crm_diff_py.load_cath_config('./catheterdata/CatheterSpatialConfiguration_1.txt')
 
@@ -32,12 +26,28 @@ def create_test_state(n_act=1):
         'CathParams': params,
         'CathConfig': config,
         'L_inserted': 100.0,
-        'ContactMode': crm_diff_py.ContactModeType.FREE_TIP,
+        'ContactMode': int(crm_diff_py.ContactModeType.FREE_TIP),
         'TipConstraintPoint': np.zeros(3),
         'TipForce': np.zeros(3),
         'deltau0_initialguess': np.zeros(3),
         'IntegrationStepSize': 0.5
     }
+
+    u_eq = np.zeros(3 * n_act)
+    eq = crm_diff_py.equilibrium_forward(u_eq, params_dict['L_inserted'], params_dict)
+    assert eq['converged'] == 0, "equilibrium_forward did not converge"
+
+    x_coil = np.zeros((n_act, 18))
+    x_coil[:, 6:9] = eq['coil_p']
+    x_coil[:, 9:18] = eq['coil_R']
+
+    xf = np.zeros(15)
+    xf[0:3] = eq['p_tip']
+    xf[3:12] = np.eye(3).flatten()
+
+    x = pack_true_legacy_state(x_coil, xf)
+
+    u = np.array([[0.1, 0.05, -0.05]] * n_act)
 
     return x, u, 0.01, params_dict, n_act
 
@@ -60,13 +70,6 @@ def test_vjp_u_gradients():
     # Upstream gradient: nonzero tip position cotangent
     grad_tip_p = np.array([1.0, -0.5, 0.25], dtype=np.float64)
 
-    # VJP (single)
-    vjp_result = crm_diff_py.true_legacy_step_vjp(
-        x_coil, xf, u, dt, params_dict['L_inserted'], params_dict, grad_tip_p
-    )
-
-    grad_u_vjp = vjp_result['grad_u']
-
     # Gradient via implicit linearization: grad_u = B^T * v_xf_next
     A, B = true_legacy_linearize(
         x, u, dt,
@@ -80,6 +83,13 @@ def test_vjp_u_gradients():
     v_xf_next = np.zeros(state_dim, dtype=np.float64)
     v_xf_next[n_act * 18:n_act * 18 + 3] = grad_tip_p
     grad_u_linearize = (B.T @ v_xf_next).reshape(n_act, 3)
+
+    # VJP (single)
+    vjp_result = crm_diff_py.true_legacy_step_vjp(
+        x_coil, xf, u, dt, params_dict['L_inserted'], params_dict, grad_tip_p
+    )
+
+    grad_u_vjp = vjp_result['grad_u']
 
     # Compare
     rel_err = np.linalg.norm(grad_u_vjp - grad_u_linearize) / (np.linalg.norm(grad_u_linearize) + 1e-10)

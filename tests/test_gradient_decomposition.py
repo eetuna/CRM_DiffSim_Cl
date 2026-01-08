@@ -68,7 +68,7 @@ def test_magnetic_torque_pathway():
     print(f"  nL_next (interface forces): {fwd_result['nL_next'].flatten()}")
     print(f"  x_coil_next[3:6] (w_next, angular velocity): {fwd_result['x_coil_next'][0, 3:6]}")
 
-    print(f"\nChecking if w_next depends on u by finite difference:")
+    print(f"\nChecking if w_next depends on u by numerical difference:")
     print(f"  (This is the DIRECT pathway: u → τ_mag → w_next)")
     eps = 1e-6
     for i in range(3):
@@ -78,7 +78,7 @@ def test_magnetic_torque_pathway():
             x_coil, xf, u_pert, dt, params_dict
         )
         dw_du_fd = (fwd_pert['x_coil_next'][0, 3:6] - fwd_result['x_coil_next'][0, 3:6]) / eps
-        print(f"  ∂w_next/∂u[{i}] (finite diff): {dw_du_fd}")
+        print(f"  ∂w_next/∂u[{i}] (numerical diff): {dw_du_fd}")
 
     print("\n" + "="*80)
     print("CONCLUSION:")

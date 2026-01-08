@@ -80,7 +80,7 @@ static const char* CRM_API_CONTRACT_DYNAMICS = "dynamics_v1_1";
 
 // Helper: convert Python dict to CRMForwardKinematicsData
 CRMForwardKinematicsData parse_fk_params(py::dict params_dict) {
-    CRMForwardKinematicsData fk_params;
+    CRMForwardKinematicsData fk_params{};
 
     // These must be persistent Python objects passed in the dict
     fk_params.CathParams = params_dict["CathParams"].cast<CRMCatheterModelParams*>();
@@ -120,6 +120,166 @@ CRMForwardKinematicsData parse_fk_params(py::dict params_dict) {
     return fk_params;
 }
 
+// IVP Jacobians: expose DYNSolverIVP_JacobiansFullstate for debugging/analysis
+py::dict py_ivp_jacobians_fullstate(
+    py::array_t<double> x_coil_arr,
+    py::array_t<double> xf_arr,
+    py::array_t<double> u_arr,
+    double dt,
+    py::dict params_dict,
+    py::object mL_guess_obj,
+    py::object nL_guess_obj
+) {
+    auto x_coil_buf = x_coil_arr.request();
+    auto xf_buf = xf_arr.request();
+    auto u_buf = u_arr.request();
+
+    if (x_coil_buf.ndim != 2 || x_coil_buf.shape[0] != NUM_ACT_SET || x_coil_buf.shape[1] != 18) {
+        throw std::runtime_error("x_coil must be [" + std::to_string(NUM_ACT_SET) + ", 18]");
+    }
+    if (xf_buf.ndim != 1 || xf_buf.shape[0] != NUM_STATES) {
+        throw std::runtime_error("xf must be [15]");
+    }
+    if (u_buf.ndim != 2 || u_buf.shape[0] != NUM_ACT_SET || u_buf.shape[1] != 3) {
+        throw std::runtime_error("u must be [" + std::to_string(NUM_ACT_SET) + ", 3]");
+    }
+
+    double* x_coil_data = static_cast<double*>(x_coil_buf.ptr);
+    double* xf_data = static_cast<double*>(xf_buf.ptr);
+    double* u_data = static_cast<double*>(u_buf.ptr);
+
+    double x_coil[NUM_ACT_SET][18];
+    double u[NUM_ACT_SET][3];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 18; ++i) {
+            x_coil[j][i] = x_coil_data[j * 18 + i];
+        }
+        for (int i = 0; i < 3; ++i) {
+            u[j][i] = u_data[j * 3 + i];
+        }
+    }
+
+    CRMForwardKinematicsData fk_params = parse_fk_params(params_dict);
+
+    if (!params_dict.contains("L_inserted")) {
+        throw std::runtime_error("L_inserted must be provided in params_dict");
+    }
+    double L_inserted = params_dict["L_inserted"].cast<double>();
+
+    const double* mL_guess = nullptr;
+    const double* nL_guess = nullptr;
+    if (!mL_guess_obj.is_none() && !nL_guess_obj.is_none()) {
+        auto mL_arr = mL_guess_obj.cast<py::array_t<double>>();
+        auto nL_arr = nL_guess_obj.cast<py::array_t<double>>();
+        mL_guess = static_cast<const double*>(mL_arr.request().ptr);
+        nL_guess = static_cast<const double*>(nL_arr.request().ptr);
+    }
+
+    TrueLegacyStepResult fwd_result;
+    std::memset(&fwd_result, 0, sizeof(TrueLegacyStepResult));
+    int status = true_legacy_step_forward(
+        x_coil, xf_data, u, dt, L_inserted, fk_params, mL_guess, nL_guess, fwd_result
+    );
+    if (status != 0) {
+        throw std::runtime_error("Forward step failed with status " + std::to_string(status));
+    }
+
+    double v_L_pre[NUM_ACT_SET][3];
+    double w_L_pre[NUM_ACT_SET][3];
+    double p_pre[NUM_ACT_SET][3];
+    double R_pre[NUM_ACT_SET][9];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 3; ++i) {
+            v_L_pre[j][i] = fwd_result.x_coil[j][i];
+            w_L_pre[j][i] = fwd_result.x_coil[j][3 + i];
+            p_pre[j][i] = fwd_result.x_coil[j][6 + i];
+        }
+        for (int i = 0; i < 9; ++i) {
+            R_pre[j][i] = fwd_result.x_coil[j][9 + i];
+        }
+    }
+
+    double ActuationCurrents[NUM_ACT_SET][3];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 3; ++i) {
+            ActuationCurrents[j][i] = fwd_result.u[j][i];
+        }
+    }
+
+    double ActInertia[NUM_ACT_SET][9];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        double mass = fk_params.CathParams->ActMass[j];
+        double r_outer = fk_params.CathParams->OuterRadius[0];
+        double r_inner = fk_params.CathParams->InnerRadius[0];
+        double seg_length = fk_params.CathParams->SegLengths[2 * j + 1];
+
+        double r_sum_sq = r_outer * r_outer + r_inner * r_inner;
+        double I_zz = 0.5 * mass * r_sum_sq;
+        double I_xx = 0.25 * mass * r_sum_sq + (1.0 / 12.0) * mass * seg_length * seg_length;
+
+        ActInertia[j][0] = I_xx;  ActInertia[j][1] = 0.0;   ActInertia[j][2] = 0.0;
+        ActInertia[j][3] = 0.0;   ActInertia[j][4] = I_xx;  ActInertia[j][5] = 0.0;
+        ActInertia[j][6] = 0.0;   ActInertia[j][7] = 0.0;   ActInertia[j][8] = I_zz;
+    }
+
+    double damping[NUM_ACT_SET][6];
+    for (int j = 0; j < NUM_ACT_SET; ++j) {
+        for (int i = 0; i < 6; ++i) {
+            damping[j][i] = fk_params.CathParams->ActDamping[j][i];
+        }
+    }
+
+    CRMShootingMethodParams shooting_params = CRMDYNConstructShootingMethodParamSet(
+        *fk_params.CathParams, *fk_params.CathConfig,
+        L_inserted, ActuationCurrents,
+        fk_params.ContactMode,
+        const_cast<double*>(fk_params.TipConstraintPoint),
+        const_cast<double*>(fk_params.TipForce),
+        fk_params.IntegrationStepSize, ActInertia,
+        v_L_pre, w_L_pre, p_pre, R_pre,
+        damping, fwd_result.dt
+    );
+
+    Eigen::MatrixXd J_xf_y, J_xf_x, J_xcoil_y, J_xcoil_x;
+    DYNSolverIVP_JacobiansFullstate(
+        shooting_params,
+        fwd_result.u0,
+        fwd_result.mL,
+        fwd_result.nL,
+        fwd_result.tau,
+        fwd_result.ftip,
+        fwd_result.x_coil,
+        fwd_result.xf,
+        J_xf_y,
+        J_xf_x,
+        J_xcoil_y,
+        J_xcoil_x
+    );
+
+    py::dict result;
+    auto J_xf_y_arr = py::array_t<double>({J_xf_y.rows(), J_xf_y.cols()});
+    auto J_xf_x_arr = py::array_t<double>({J_xf_x.rows(), J_xf_x.cols()});
+    auto J_xcoil_y_arr = py::array_t<double>({J_xcoil_y.rows(), J_xcoil_y.cols()});
+    auto J_xcoil_x_arr = py::array_t<double>({J_xcoil_x.rows(), J_xcoil_x.cols()});
+
+    std::memcpy(J_xf_y_arr.mutable_data(), J_xf_y.data(),
+                J_xf_y.rows() * J_xf_y.cols() * sizeof(double));
+    std::memcpy(J_xf_x_arr.mutable_data(), J_xf_x.data(),
+                J_xf_x.rows() * J_xf_x.cols() * sizeof(double));
+    std::memcpy(J_xcoil_y_arr.mutable_data(), J_xcoil_y.data(),
+                J_xcoil_y.rows() * J_xcoil_y.cols() * sizeof(double));
+    std::memcpy(J_xcoil_x_arr.mutable_data(), J_xcoil_x.data(),
+                J_xcoil_x.rows() * J_xcoil_x.cols() * sizeof(double));
+
+    result["J_xf_y"] = J_xf_y_arr;
+    result["J_xf_x"] = J_xf_x_arr;
+    result["J_xcoil_y"] = J_xcoil_y_arr;
+    result["J_xcoil_x"] = J_xcoil_x_arr;
+    result["status"] = status;
+
+    return result;
+}
+
 // Wrapper for equilibrium_forward
 py::dict py_equilibrium_forward(
     py::array_t<double> u_arr,
@@ -157,6 +317,14 @@ py::dict py_equilibrium_forward(
     out["p_tip"] = p_tip_arr;
     out["deltau0"] = deltau0_arr;
     out["converged"] = result.converged;
+
+    // Coil poses (distal to proximal order)
+    auto coil_R_arr = py::array_t<double>({NUM_ACT_SET, 9});
+    auto coil_p_arr = py::array_t<double>({NUM_ACT_SET, 3});
+    std::memcpy(coil_R_arr.mutable_data(), result.coil_R, NUM_ACT_SET * 9 * sizeof(double));
+    std::memcpy(coil_p_arr.mutable_data(), result.coil_p, NUM_ACT_SET * 3 * sizeof(double));
+    out["coil_R"] = coil_R_arr;
+    out["coil_p"] = coil_p_arr;
 
     // Cache Jacobians for backward (return as 2D numpy arrays, row-major)
     // Shape (3, 3) for J_p_u0, J_u_u0, K_tip
@@ -362,6 +530,12 @@ PYBIND11_MODULE(crm_diff_py, m) {
           py::arg("params_dict"),
           py::arg("mL_guess") = py::none(), py::arg("nL_guess") = py::none(),
           "Compute A, B linearization matrices using implicit function theorem.");
+
+    m.def("ivp_jacobians_fullstate", &py_ivp_jacobians_fullstate,
+          py::arg("x_coil"), py::arg("xf"), py::arg("u"), py::arg("dt"),
+          py::arg("params_dict"),
+          py::arg("mL_guess") = py::none(), py::arg("nL_guess") = py::none(),
+          "Compute IVP Jacobians J_xf_y, J_xf_x, J_xcoil_y, J_xcoil_x for FULLSTATE.");
 
     m.def("bvp_jacobians_fullstate", &py_bvp_jacobians_fullstate,
           py::arg("mL"), py::arg("nL"), py::arg("x_coil"), py::arg("xf"),
@@ -962,6 +1136,7 @@ py::dict py_true_legacy_linearize(
 
     // Step 1: Run forward pass to cache data
     TrueLegacyStepResult fwd_result;
+    std::memset(&fwd_result, 0, sizeof(TrueLegacyStepResult));
     int status = true_legacy_step_forward(
         x_coil, xf, u, dt, L_inserted, fk_params, mL_guess, nL_guess, fwd_result
     );

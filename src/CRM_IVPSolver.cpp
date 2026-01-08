@@ -596,6 +596,7 @@ namespace CRMCatheterModel {
 		if (ird_f < 0) ird_f = 0;
 		int ird = (int)ird_f;	//    integer index
 		double iru_f = ceil(ix); 	// index for round up  -- doubleing point
+		if (iru_f < 0) iru_f = 0;
 		if (iru_f > in_Params.no_fcum_steps) iru_f = in_Params.no_fcum_steps;
 		int iru = (int)iru_f;	//    integer index
 		double ixmird = ix - ird;    // weight for interpolation

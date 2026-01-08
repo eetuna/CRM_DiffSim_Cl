@@ -24,7 +24,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'build'))
 import crm_diff_py
-from crm_dynamics_torch import dynamics_step
+from quarantine.crm_dynamics_torch import dynamics_step
 from control.lqr import finite_horizon_lqr
 
 

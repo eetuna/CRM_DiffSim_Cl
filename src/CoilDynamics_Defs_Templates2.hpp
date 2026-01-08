@@ -168,100 +168,76 @@ void CRMFlexible_IVP_Back_T(
 
     int N = N_steps;  // Use substepped count for Dual
 
+    constexpr double P_COEFF_N = 55.0 / 24.0;
+    constexpr double P_COEFF_Nm1 = -59.0 / 24.0;
+    constexpr double P_COEFF_Nm2 = 37.0 / 24.0;
+    constexpr double P_COEFF_Nm3 = -9.0 / 24.0;
+    constexpr double C_COEFF_Np1 = 9.0 / 24.0;
+    constexpr double C_COEFF_N = 19.0 / 24.0;
+    constexpr double C_COEFF_Nm1 = -5.0 / 24.0;
+    constexpr double C_COEFF_Nm2 = 1.0 / 24.0;
+
     // RK2 initialization for first 3 steps
     for (int idx = 0; idx < (N < 3 ? N : 3); idx++) {
-        // RK2 step
-        _DVT k1, k2;
-        _SVT x_mid;
+        _DVT k1;
+        _DVT k2oh;
+        _SVT x_n_p_k1o2;
 
-        CRMIntegrand_dyn_T<T>(t_n, x_n, IntegrandParams, n_L, k1);
+        CRMIntegrand_dyn_T<T>(t_n, x_n, IntegrandParams, n_L, xdot_n);
+        k1 = h * xdot_n;
+        x_n_p_k1o2 = x_n + k1 * 0.5;
+        SE3_Analytical_Step_T(x_n._R, x_n._p, x_n._u, h * 0.5, x_n_p_k1o2._R, x_n_p_k1o2._p);
 
-        x_mid = x_n + (h / 2.0) * k1;
-        // R doesn't change in derivative (handled analytically)
-        for (int i_r = 0; i_r < 9; ++i_r) {
-            x_mid._R[i_r] = x_n._R[i_r];
-        }
-
-        CRMIntegrand_dyn_T<T>(t_n + h / 2.0, x_mid, IntegrandParams, n_L, k2);
-
-        x_np1 = x_n + h * k2;
-
-        // Analytical SE(3) integration for R and p
-        T u_hat[9];
-        wHat_T(x_np1._u, u_hat);
-
-        for (int i = 0; i < 3; ++i) {
-            x_np1._p[i] = x_n._p[i] + T(h) * x_n._R[i * 3 + 2];
-        }
-
-        T Rdot[9];
-        mMult_AB_T<T, 3, 3, 3>(x_n._R, u_hat, Rdot);
-        for (int i = 0; i < 9; ++i) {
-            x_np1._R[i] = x_n._R[i] + T(h) * Rdot[i];
-        }
-
-        xdot_n = k2;
-
-        // Save history
-        if (idx == 0) {
-            xdot_nm3 = xdot_n;
-            x_nm3 = x_n;
-        } else if (idx == 1) {
-            xdot_nm2 = xdot_nm3;
-            x_nm2 = x_nm3;
-            xdot_nm3 = xdot_n;
-            x_nm3 = x_n;
-        } else if (idx == 2) {
-            xdot_nm1 = xdot_nm2;
-            x_nm1 = x_nm2;
-            xdot_nm2 = xdot_nm3;
-            x_nm2 = x_nm3;
-            xdot_nm3 = xdot_n;
-            x_nm3 = x_n;
-        }
+        CRMIntegrand_dyn_T<T>(t_n + h / 2.0, x_n_p_k1o2, IntegrandParams, n_L, k2oh);
+        x_np1 = x_n + k2oh * h;
+        SE3_Analytical_Step_T(x_n._R, x_n._p, x_n_p_k1o2._u, h, x_np1._R, x_np1._p);
 
         t_n = t_n + h;
+        x_nm3 = x_nm2;
+        x_nm2 = x_nm1;
+        x_nm1 = x_n;
         x_n = x_np1;
+        xdot_nm3 = xdot_nm2;
+        xdot_nm2 = xdot_nm1;
+        xdot_nm1 = xdot_n;
     }
 
     // ABM4 steps for remaining
     for (int idx = 3; idx < N; idx++) {
-        // ABM4 predictor: x_np1_pred = x_n + h/24 * (55*xdot_n - 59*xdot_nm1 + 37*xdot_nm2 - 9*xdot_nm3)
-        x_np1 = x_n + (h / 24.0) * (55.0 * xdot_n + (-59.0) * xdot_nm1 + 37.0 * xdot_nm2 + (-9.0) * xdot_nm3);
+        CRMIntegrand_dyn_T<T>(t_n, x_n, IntegrandParams, n_L, xdot_n);
+        _SVT x_np1_hat = x_n + h * (P_COEFF_N * xdot_n + P_COEFF_Nm1 * xdot_nm1 + P_COEFF_Nm2 * xdot_nm2 + P_COEFF_Nm3 * xdot_nm3);
 
-        // Compute derivative at predicted point
-        _DVT xdot_np1_pred;
-        CRMIntegrand_dyn_T<T>(t_n + h, x_np1, IntegrandParams, n_L, xdot_np1_pred);
-
-        // ABM4 corrector: x_np1 = x_n + h/24 * (9*xdot_np1 + 19*xdot_n - 5*xdot_nm1 + xdot_nm2)
-        x_np1 = x_n + (h / 24.0) * (9.0 * xdot_np1_pred + 19.0 * xdot_n + (-5.0) * xdot_nm1 + xdot_nm2);
-
-        // Analytical SE(3) integration
-        T u_hat[9];
-        wHat_T(x_np1._u, u_hat);
-
+        T u_n_pred[3];
         for (int i = 0; i < 3; ++i) {
-            x_np1._p[i] = x_n._p[i] + T(h) * x_n._R[i * 3 + 2];
+            u_n_pred[i] = T(P_COEFF_N) * x_n._u[i]
+                        + T(P_COEFF_Nm1) * x_nm1._u[i]
+                        + T(P_COEFF_Nm2) * x_nm2._u[i]
+                        + T(P_COEFF_Nm3) * x_nm3._u[i];
         }
+        SE3_Analytical_Step_T(x_n._R, x_n._p, u_n_pred, h, x_np1_hat._R, x_np1_hat._p);
 
-        T Rdot[9];
-        mMult_AB_T<T, 3, 3, 3>(x_n._R, u_hat, Rdot);
-        for (int i = 0; i < 9; ++i) {
-            x_np1._R[i] = x_n._R[i] + T(h) * Rdot[i];
+        _DVT xdot_np1_pred;
+        CRMIntegrand_dyn_T<T>(t_n + h, x_np1_hat, IntegrandParams, n_L, xdot_np1_pred);
+
+        x_np1 = x_n + h * (C_COEFF_Np1 * xdot_np1_pred + C_COEFF_N * xdot_n + C_COEFF_Nm1 * xdot_nm1 + C_COEFF_Nm2 * xdot_nm2);
+
+        T u_n_corr[3];
+        for (int i = 0; i < 3; ++i) {
+            u_n_corr[i] = T(C_COEFF_Np1) * x_np1_hat._u[i]
+                        + T(C_COEFF_N) * x_n._u[i]
+                        + T(C_COEFF_Nm1) * x_nm1._u[i]
+                        + T(C_COEFF_Nm2) * x_nm2._u[i];
         }
-
-        // Update history
-        xdot_nm1 = xdot_n;
-        x_nm1 = x_n;
-        xdot_nm2 = xdot_nm1;
-        x_nm2 = x_nm1;
-        xdot_nm3 = xdot_nm2;
-        x_nm3 = x_nm2;
-
-        CRMIntegrand_dyn_T<T>(t_n + h, x_np1, IntegrandParams, n_L, xdot_n);
+        SE3_Analytical_Step_T(x_n._R, x_n._p, u_n_corr, h, x_np1._R, x_np1._p);
 
         t_n = t_n + h;
+        x_nm3 = x_nm2;
+        x_nm2 = x_nm1;
+        x_nm1 = x_n;
         x_n = x_np1;
+        xdot_nm3 = xdot_nm2;
+        xdot_nm2 = xdot_nm1;
+        xdot_nm1 = xdot_n;
     }
 
     xf_statevec = x_n;
@@ -288,6 +264,7 @@ void CRMFlexForward_pass_T(
     T out_p[3],
     T out_R[9]
 ) {
+
     T n_L[3];
     for (int i = 0; i < 3; ++i) {
         n_L[i] = in_n_L[i];
@@ -319,6 +296,16 @@ void CRMFlexForward_pass_T(
         N_steps = base_steps * DUAL_SUBSTEP_FACTOR;
     } else {
         N_steps = base_steps;
+    }
+    if (N_steps <= 0) {
+        for (int i = 0; i < 3; ++i) {
+            out_u[i] = in_u[i];
+            out_p[i] = in_p[i];
+        }
+        for (int i = 0; i < 9; ++i) {
+            out_R[i] = in_R[i];
+        }
+        return;
     }
     h = (SegBounds[SegmentIndex + 1] - SegBounds[SegmentIndex]) / (N_steps * 1.0);
 
@@ -412,6 +399,18 @@ void CRMFlexForward_pass_T(
 
     for (int idx = 3; idx < N; idx++) {
         x_np1 = x_n + (h / 24.0) * (55.0 * xdot_n + (-59.0) * xdot_nm1 + 37.0 * xdot_nm2 + (-9.0) * xdot_nm3);
+        {
+            T u_hat_pred[9];
+            wHat_T(x_np1._u, u_hat_pred);
+            for (int i = 0; i < 3; ++i) {
+                x_np1._p[i] = x_n._p[i] + T(h) * x_n._R[i * 3 + 2];
+            }
+            T Rdot_pred[9];
+            mMult_AB_T<T, 3, 3, 3>(x_n._R, u_hat_pred, Rdot_pred);
+            for (int i = 0; i < 9; ++i) {
+                x_np1._R[i] = x_n._R[i] + T(h) * Rdot_pred[i];
+            }
+        }
 
         _DVT xdot_np1_pred;
         CRMIntegrand_dyn_T<T>(t_n + h, x_np1, IntegrandParams, n_L, xdot_np1_pred);
@@ -431,12 +430,12 @@ void CRMFlexForward_pass_T(
             x_np1._R[i] = x_n._R[i] + T(h) * Rdot[i];
         }
 
-        xdot_nm1 = xdot_n;
-        x_nm1 = x_n;
-        xdot_nm2 = xdot_nm1;
-        x_nm2 = x_nm1;
         xdot_nm3 = xdot_nm2;
+        xdot_nm2 = xdot_nm1;
+        xdot_nm1 = xdot_n;
         x_nm3 = x_nm2;
+        x_nm2 = x_nm1;
+        x_nm1 = x_n;
 
         CRMIntegrand_dyn_T<T>(t_n + h, x_np1, IntegrandParams, n_L, xdot_n);
 
@@ -469,6 +468,7 @@ void CRMIVP_DYN_T(CRMIVPCoreParams& CoreParams,
                   T out_u_new[3],
                   T out_p_new[3],
                   T out_R_new[9]) {
+
 
     T x_coil[NUM_ACT_SET][NUM_COIL_STATES];
     T muhat[NUM_ACT_SET][9];
@@ -669,6 +669,7 @@ void DYNSolverIVP_T(CRMShootingMethodParams& in_Params,
     T u_new[3], p_new[3], R_new[9];
     CRMIVP_DYN_T(CoreParams, in_u0, in_Params.p0, in_Params.R0, in_mL, in_nL, in_tau, in_ftip, in_x_coil,
                  out_coil_state, u_new, p_new, R_new);
+
 
     for (int i = 0; i < NUM_STATES; ++i) {
         if (i < 3) {

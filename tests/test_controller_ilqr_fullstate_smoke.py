@@ -1,13 +1,10 @@
 """
-Smoke test for FULLSTATE controllers (iLQR, LQR).
-
-Legacy file retained for backwards compatibility with existing test runs.
+FULLSTATE iLQR controller smoke test (end-to-end).
 """
 
 import os
 import sys
 import numpy as np
-import pytest
 
 repo_root = os.path.join(os.path.dirname(__file__), '..')
 build_dir = os.path.join(repo_root, 'build_s15')
@@ -18,17 +15,13 @@ sys.path.insert(0, os.path.join(repo_root, 'python'))
 
 import crm_diff_py
 from control.ilqr import iLQRSolver
-from control.lqr import finite_horizon_lqr
-from control.true_legacy_state_adapter import pack_true_legacy_state
+from control.true_legacy_state_adapter import pack_true_legacy_state, unpack_true_legacy_state
 
 
-def create_test_scenario(n_act=1):
-    u_eq = np.zeros(3 * n_act, dtype=np.float64)
-
+def make_params_dict():
     params = crm_diff_py.load_cath_params('./catheterdata/CatheterParameterSet_1_dyn.txt')
     config = crm_diff_py.load_cath_config('./catheterdata/CatheterSpatialConfiguration_1.txt')
-
-    params_dict = {
+    return {
         'CathParams': params,
         'CathConfig': config,
         'L_inserted': 100.0,
@@ -39,67 +32,65 @@ def create_test_scenario(n_act=1):
         'IntegrationStepSize': 0.5,
     }
 
-    eq = crm_diff_py.equilibrium_forward(u_eq, params_dict['L_inserted'], params_dict)
-    assert eq['converged'] == 0, "equilibrium_forward did not converge"
 
-    xf = np.zeros(15, dtype=np.float64)
-    xf[0:3] = eq['p_tip']
-    xf[3:12] = np.eye(3).flatten()
+def make_initial_state(params_dict, n_act=1, L_inserted=100.0):
+    u_eq = np.zeros(3 * n_act, dtype=np.float64)
+    eq = crm_diff_py.equilibrium_forward(u_eq, L_inserted, params_dict)
+    assert eq['converged'] == 0, "equilibrium_forward did not converge"
 
     x_coil = np.zeros((n_act, 18), dtype=np.float64)
     x_coil[:, 6:9] = eq['coil_p']
     x_coil[:, 9:18] = eq['coil_R']
 
+    xf = np.zeros(15, dtype=np.float64)
+    xf[0:3] = eq['p_tip']
+    xf[3:12] = np.eye(3).flatten()
+
     x0 = pack_true_legacy_state(x_coil, xf)
-    p_target = xf[:3].copy()
-
-    return x0, p_target, params_dict, n_act
+    return x0, xf[:3].copy()
 
 
-def test_ilqr_smoke():
-    x0, p_target, params_dict, n_act = create_test_scenario()
-    horizon = 1
+def test_controller_ilqr_fullstate_smoke():
+    np.random.seed(0)
+    n_act = 1
+    horizon = 6
+    dt = 0.01
+
+    params_dict = make_params_dict()
+    x0, p_tip_0 = make_initial_state(params_dict, n_act)
+    p_target = p_tip_0.copy()
+
     solver = iLQRSolver(
-        dt=0.01,
+        dt=dt,
         L_inserted=100.0,
         params_dict=params_dict,
         horizon=horizon,
         n_act=n_act,
+        Q=None,
+        R=0.01 * np.eye(3 * n_act),
         p_target=p_target,
         terminal_weight=10.0,
         max_iters=1,
         jacobian_mode="implicit",
     )
 
-    U_init = np.zeros((horizon, 3 * n_act))
+    U_init = np.zeros((horizon, 3 * n_act), dtype=np.float64)
     X_opt, U_opt, _ = solver.solve(x0, U_init=U_init, verbose=False)
 
     assert X_opt.shape == (horizon + 1, solver.state_dim)
     assert U_opt.shape == (horizon, solver.control_dim)
     assert np.all(np.isfinite(X_opt)), "X_opt contains NaN/Inf"
     assert np.all(np.isfinite(U_opt)), "U_opt contains NaN/Inf"
+    assert np.all(np.isfinite(solver.cost_history)), "cost_history contains NaN/Inf"
 
+    if len(solver.cost_history) > 1:
+        assert solver.cost_history[-1] <= solver.cost_history[0] + 1e-8
 
-def test_lqr_smoke():
-    pytest.skip("Covered by test_controller_lqr_fullstate_smoke.py")
-    x0, p_target, params_dict, n_act = create_test_scenario()
-    horizon = 1
-    u_nominal = np.zeros((horizon, 3 * n_act), dtype=np.float64)
-    U_lqr, X_lqr, P_tip_lqr = finite_horizon_lqr(
-        x0,
-        p_target,
-        0.01,
-        100.0,
-        params_dict,
-        horizon,
-        n_act=n_act,
-        terminal_weight=10.0,
-        u_nominal=u_nominal,
-        verbose=False,
+    u0 = U_opt[0].reshape(n_act, 3)
+    x_coil_0, xf_0 = unpack_true_legacy_state(x0, n_act)
+    result = crm_diff_py.true_legacy_step_forward(
+        x_coil_0, xf_0, u0, dt, params_dict
     )
-
-    assert X_lqr.shape == (horizon + 1, 18 * n_act + 15)
-    assert U_lqr.shape == (horizon, 3 * n_act)
-    assert P_tip_lqr.shape == (horizon + 1, 3)
-    assert np.all(np.isfinite(X_lqr)), "X_lqr contains NaN/Inf"
-    assert np.all(np.isfinite(U_lqr)), "U_lqr contains NaN/Inf"
+    assert result['converged'], "Dynamics step did not converge"
+    x_next = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])
+    assert np.linalg.norm(x_next - x0) > 0.0, "State did not advance"

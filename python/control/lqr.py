@@ -53,6 +53,11 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
     state_dim = true_legacy_state_dim(n_act)  # 18*n_act + 15
     control_dim = 3 * n_act
 
+    if x0.shape != (state_dim,):
+        raise ValueError(f"x0 must have shape ({state_dim},), got {x0.shape}")
+    if p_target.shape != (3,):
+        raise ValueError(f"p_target must have shape (3,), got {p_target.shape}")
+
     # Default cost matrices
     if Q is None:
         Q = np.zeros((state_dim, state_dim))
@@ -75,6 +80,10 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
 
         U_nom = np.tile(u_bias, (horizon, 1))
     else:
+        if u_nominal.shape != (horizon, control_dim):
+            raise ValueError(
+                f"u_nominal must have shape ({horizon}, {control_dim}), got {u_nominal.shape}"
+            )
         U_nom = u_nominal.copy()
 
     if verbose:
@@ -93,6 +102,9 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
     B_list = []  # Jacobians ∂x_next/∂u_t
     J_p_list = []  # Tip Jacobians ∂p_tip/∂x
 
+    warmstart = None
+    warmstart_seed = None
+    warmstart_history = []
     for t in range(horizon):
         x_t = X_nom[t]
         u_t = U_nom[t]
@@ -100,24 +112,68 @@ def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,
         # Forward rollout
         x_coil_t, xf_t = unpack_true_legacy_state(x_t, n_act)
         u_t_reshaped = u_t.reshape(n_act, 3)
+        warmstart_in = warmstart
+        mL_guess = warmstart_in['mL_guess'] if warmstart_in is not None else None
+        nL_guess = warmstart_in['nL_guess'] if warmstart_in is not None else None
         result = crm_diff_py.true_legacy_step_forward(
-            x_coil_t, xf_t, u_t_reshaped, dt, params_dict
+            x_coil_t, xf_t, u_t_reshaped, dt, params_dict, mL_guess, nL_guess
         )
         if not result['converged']:
             raise RuntimeError(f"[LQR] Nominal rollout failed at t={t}: converged={result['converged']}")
+        warmstart = {
+            'mL_guess': np.ascontiguousarray(result['mL_next'], dtype=np.float64),
+            'nL_guess': np.ascontiguousarray(result['nL_next'], dtype=np.float64),
+        }
+        if warmstart_seed is None:
+            warmstart_seed = warmstart
+        warmstart_history.append(warmstart)
 
         X_nom[t+1] = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])
         P_tip_nom[t+1] = result['xf_next'][:3]
 
         # Linearize via analytic implicit function theorem
         u_t_reshaped = u_t.reshape(n_act, 3)
-        A_t, B_t = true_legacy_linearize(
-            x_t, u_t_reshaped, dt,
-            n_act=n_act,
-            catheter_params=params_dict,
-            L_inserted=L_inserted,
-            method="implicit"
-        )
+        def _linearize_with(ws):
+            return true_legacy_linearize(
+                x_t, u_t_reshaped, dt,
+                n_act=n_act,
+                catheter_params=params_dict,
+                L_inserted=L_inserted,
+                method="implicit",
+                mL_guess=None if ws is None else ws['mL_guess'],
+                nL_guess=None if ws is None else ws['nL_guess'],
+            )
+
+        candidates = []
+
+        def _add_candidate(ws):
+            if ws is None:
+                return
+            if (not np.isfinite(ws['mL_guess']).all()) or (not np.isfinite(ws['nL_guess']).all()):
+                return
+            if any(ws is c for c in candidates):
+                return
+            candidates.append(ws)
+
+        _add_candidate(warmstart_seed)
+        _add_candidate(warmstart_in)
+        _add_candidate(warmstart)
+        for ws in warmstart_history:
+            _add_candidate(ws)
+        candidates.append(None)
+
+        last_error = None
+        for ws in candidates:
+            try:
+                A_t, B_t = _linearize_with(ws)
+            except RuntimeError as exc:
+                last_error = exc
+                continue
+            if np.isfinite(A_t).all() and np.isfinite(B_t).all():
+                break
+            last_error = RuntimeError("Linearization returned non-finite A/B in LQR rollout.")
+        else:
+            raise last_error if last_error is not None else RuntimeError("Linearization failed in LQR rollout.")
 
         A_list.append(A_t)
         B_list.append(B_t)

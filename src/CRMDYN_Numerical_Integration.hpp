@@ -47,6 +47,7 @@ namespace CRMCatheterModel {
         if (ird_f < 0) ird_f = 0;
         int ird = (int)ird_f;	//    integer index
         double iru_f = ceil(ix); 	// index for round up  -- doubleing point
+        if (iru_f < 0) iru_f = 0;
         if (iru_f > in_Params.no_fcum_steps) iru_f = in_Params.no_fcum_steps;
         int iru = (int)iru_f;	//    integer index
         double ixmird = ix - ird;    // weight for interpolation
@@ -198,7 +199,7 @@ namespace CRMCatheterModel {
         double Length;
         double deltalambdainv;
         T fcum[3];
-        double ustardot[3];  //  We are assuming Kdot=0.0 (K=const)
+        T ustardot[3];  //  We are assuming Kdot=0.0 (K=const)
 
         // copy inputs and parameters to local variables
         Length = in_Params.Li;
@@ -208,7 +209,7 @@ namespace CRMCatheterModel {
         auto& ustar = in_Params.ustar;
         auto& l = in_Params.l;
         for (int i = 0; i < 3; i++) {
-            ustardot[i] = 0.0; // we assume ustardot=0.0 since our rest shape model is piecewise constant curvature
+            ustardot[i] = T(0.0); // we assume ustardot=0.0 since our rest shape model is piecewise constant curvature
         }
 
         // for simplicity, create aliases
@@ -223,6 +224,7 @@ namespace CRMCatheterModel {
         if (ird_f < 0) ird_f = 0;
         int ird = (int)ird_f;
         double iru_f = ceil(ix);
+        if (iru_f < 0) iru_f = 0;
         if (iru_f > in_Params.no_fcum_steps) iru_f = in_Params.no_fcum_steps;
         int iru = (int)iru_f;
         double ixmird = ix - ird;
@@ -241,6 +243,18 @@ namespace CRMCatheterModel {
         // add nL_spatial to fcum
         for (int i = 0; i < 3; i++) {
             fcum[i] += nL_spatial[i];
+        }
+
+        // Convert constant parameters to T to avoid mixed-type operations.
+        T K_T[9];
+        T Kinv_T[9];
+        T ustar_T[3];
+        for (int i = 0; i < 9; ++i) {
+            K_T[i] = T(K[i]);
+            Kinv_T[i] = T(Kinv[i]);
+        }
+        for (int i = 0; i < 3; ++i) {
+            ustar_T[i] = T(ustar[i]);
         }
 
         // calculate u_hat
@@ -263,14 +277,14 @@ namespace CRMCatheterModel {
         T RTl[3];
         mMult_ATB_T<T, 3, 3, 1>(R, l_T, RTl);  // R'*l
         T umustar[3];
-        mSub_AB_T<T, 3, 1>(u, ustar, umustar);  // (u-ustar_s)
+        mSub_AB_T<T, 3, 1>(u, ustar_T, umustar);  // (u-ustar_s)
         T Kumustar[3], uhatKumustar[3];
-        mMult_AB_T<T, 3, 3, 1>(K, umustar, Kumustar);
+        mMult_AB_T<T, 3, 3, 1>(K_T, umustar, Kumustar);
         mMult_AB_T<T, 3, 3, 1>(u_hat, Kumustar, uhatKumustar);  //(um*K+Kdot)*(u-ustar_s) assuming Kdot=0
         T sumterm[3];
         mAdd_ABC_T<T, 3, 1>(uhatKumustar, e3hatRTfcum, RTl, sumterm);  // ((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
         T KinvSum[3];
-        mMult_AB_T<T, 3, 3, 1>(Kinv, sumterm, KinvSum);  // Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
+        mMult_AB_T<T, 3, 3, 1>(Kinv_T, sumterm, KinvSum);  // Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l)
         mSub_AB_T<T, 3, 1>(ustardot, KinvSum, udot);  // udot = ustardot - Kinv*((um*K+Kdot)*(u-ustar_s) + e3m*R'*intf + R'*l);
     }
 

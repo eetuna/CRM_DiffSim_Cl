@@ -16,7 +16,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'build'))
-from crm_dynamics_torch import dynamics_step
+from quarantine.crm_dynamics_torch import dynamics_step
 
 
 def finite_horizon_lqr(x0, p_target, dt, L_inserted, params_dict, horizon,

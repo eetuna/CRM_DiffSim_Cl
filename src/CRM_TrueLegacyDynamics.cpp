@@ -224,6 +224,11 @@ int true_legacy_step_backward(
         }
     }
 
+    // (debug lambda removed)
+
+    // (debug lambda removed)
+
+
     // Construct actuator inertia using hollow cylinder formula
     // Units: kg * mm^2 (mass in kg, radii and lengths in mm)
     double ActInertia[NUM_ACT_SET][9];
@@ -278,7 +283,6 @@ int true_legacy_step_backward(
         J_xcoil_y,
         J_xcoil_x
     );
-
     // Step 3: Push cotangent through IVP Jacobians
     // v_y = J^T * v_xf_next, where y includes outputs that depend on BVP solution
 
@@ -290,7 +294,7 @@ int true_legacy_step_backward(
 
     const int dim_y = NUM_ACT_SET * 6;
 
-    // Step 5: Compute BVP Jacobian blocks J_yy, J_yu, and J_yx using strictly analytic methods (NO FD)
+    // Step 5: Compute BVP Jacobian blocks J_yy, J_yu, and J_yx using strictly analytic methods
     Eigen::MatrixXd J_yy, J_yu, J_yx;
 
     compute_bvp_jacobians_full_analytic(
@@ -300,23 +304,9 @@ int true_legacy_step_backward(
         J_yy, J_yu, J_yx
     );
 
-    // DEBUG: Print J_yu to verify it's non-zero
-    std::cerr << "DEBUG backward: J_yu norm = " << J_yu.norm() << std::endl;
-    std::cerr << "DEBUG backward: J_yu max = " << J_yu.cwiseAbs().maxCoeff() << std::endl;
-    std::cerr << "DEBUG backward: J_yu sample (0,0) = " << J_yu(0, 0) << std::endl;
-    std::cerr.flush();
-
     // Step 6: Precompute implicit sensitivities from J_yy.
     int rank_used = dim_y;
     double residual_norm = 0.0;
-
-    // DEBUG: Print v_y to understand cotangent flow
-    std::cerr << "DEBUG backward: v_y = [";
-    for (int i = 0; i < std::min(dim_y, 6); ++i) {
-        std::cerr << v_y[i] << (i < std::min(dim_y, 6)-1 ? ", " : "");
-    }
-    std::cerr << "]" << std::endl;
-    std::cerr.flush();
 
     // Use QR decomposition for stable solve
     Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr_solver(J_yy);
@@ -656,13 +646,14 @@ int true_legacy_linearize_implicit(
         J_yy, J_yu, J_yx
     );
 
-    // Step 4: Solve R_y^{-1} * R_x and R_y^{-1} * R_u using one QR factorization
-    Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr_solver(J_yy);
+    // Step 4: Solve R_y^{-1} * R_x and R_y^{-1} * R_u
+    // Use full-pivot LU for robustness with potentially ill-conditioned J_yy.
+    Eigen::FullPivLU<Eigen::MatrixXd> lu_solver(J_yy);
 
-    Eigen::MatrixXd S_x = qr_solver.solve(J_yx);  // (6N x (18N+15))
-    Eigen::MatrixXd S_u = qr_solver.solve(J_yu);  // (6N x 3N)
+    Eigen::MatrixXd S_x = lu_solver.solve(J_yx);  // (6N x (18N+15))
+    Eigen::MatrixXd S_u = lu_solver.solve(J_yu);  // (6N x 3N)
 
-    int rank_used = qr_solver.rank();
+    int rank_used = lu_solver.rank();
     double residual_x = (J_yy * S_x - J_yx).norm();
     double residual_u = (J_yy * S_u - J_yu).norm();
 

@@ -95,6 +95,10 @@ class MPCController:
             u_mpc: np.array (control_dim,), control to apply
             info: dict, diagnostic information
         """
+        if x_current.shape != (self.state_dim,):
+            raise ValueError(
+                f"x_current must have shape ({self.state_dim},), got {x_current.shape}"
+            )
         # Get target position at end of horizon for look-ahead tracking
         t_horizon = t_current + self.horizon * self.dt
         p_target = self.p_target_fn(t_horizon)
@@ -123,9 +127,8 @@ class MPCController:
 
         # Warm-start: shift previous solution
         if self.U_prev is None:
-            # Cold start with small random perturbation
-            np.random.seed(42)
-            U_init = np.random.randn(self.horizon, self.control_dim) * 0.02
+            # Cold start with zero controls for stability
+            U_init = np.zeros((self.horizon, self.control_dim))
         else:
             # Shift previous solution and append last control
             U_init = np.zeros((self.horizon, self.control_dim))
@@ -208,6 +211,7 @@ def simulate_mpc_tracking(controller, x0, t_start, t_end, dt):
     p_target_history[0] = controller.p_target_fn(t_current)
 
     # Closed-loop simulation
+    warmstart = None
     for step in range(num_steps):
         # Progress indicator
         if step % 10 == 0:
@@ -221,10 +225,20 @@ def simulate_mpc_tracking(controller, x0, t_start, t_end, dt):
         # Apply control and step dynamics
         x_coil_t, xf_t = unpack_true_legacy_state(x_current, controller.n_act)
         result = crm_diff_py.true_legacy_step_forward(
-            x_coil_t, xf_t, u_mpc, dt, controller.params_dict
+            x_coil_t,
+            xf_t,
+            u_mpc,
+            dt,
+            controller.params_dict,
+            None if warmstart is None else warmstart['mL_guess'],
+            None if warmstart is None else warmstart['nL_guess'],
         )
         if not result['converged']:
             raise RuntimeError(f"Dynamics step failed at t={t_current}: converged={result['converged']}")
+        warmstart = {
+            'mL_guess': np.ascontiguousarray(result['mL_next'], dtype=np.float64),
+            'nL_guess': np.ascontiguousarray(result['nL_next'], dtype=np.float64),
+        }
 
         # Update state
         x_current = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 build_dir = os.path.join(os.path.dirname(__file__), '..', 'build')
 sys.path.insert(0, build_dir)
 
-import crm_dynamics_torch
+from . import crm_dynamics_torch
 import crm_diff_py
 
 

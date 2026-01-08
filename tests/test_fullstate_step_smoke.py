@@ -17,8 +17,12 @@ import numpy as np
 import torch
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'build'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
+repo_root = os.path.join(os.path.dirname(__file__), '..')
+build_dir = os.path.join(repo_root, 'build_s15')
+if not os.path.isdir(build_dir):
+    build_dir = os.path.join(repo_root, 'build')
+sys.path.insert(0, build_dir)
+sys.path.insert(0, os.path.join(repo_root, 'python'))
 
 import crm_diff_py
 from control.true_legacy_state_adapter import (
@@ -34,18 +38,19 @@ def get_params():
     return params
 
 
-def get_initial_state(n_act=1):
-    """Get a valid initial state at origin."""
-    # Use torch tensors as the Python wrapper expects
+def get_initial_state(params_dict, n_act=1):
+    """Get a valid initial state from equilibrium kinematics."""
+    u_eq = np.zeros(3 * n_act, dtype=np.float64)
+    eq = crm_diff_py.equilibrium_forward(u_eq, params_dict['L_inserted'], params_dict)
+    assert eq['converged'] == 0, "equilibrium_forward did not converge"
+
     x_coil = torch.zeros((n_act, 18), dtype=torch.float64)
-    # Set rotation to identity
-    for j in range(n_act):
-        x_coil[j, 9:18] = torch.eye(3, dtype=torch.float64).flatten()
-        x_coil[j, 6:9] = torch.tensor([0.0, 0.0, 1.0 + j], dtype=torch.float64)
+    x_coil[:, 6:9] = torch.from_numpy(eq['coil_p']).to(dtype=torch.float64)
+    x_coil[:, 9:18] = torch.from_numpy(eq['coil_R']).to(dtype=torch.float64)
 
     xf = torch.zeros(15, dtype=torch.float64)
     xf[3:12] = torch.eye(3, dtype=torch.float64).flatten()
-    xf[:3] = torch.tensor([0.0, 0.0, 10.0], dtype=torch.float64)
+    xf[:3] = torch.from_numpy(eq['p_tip']).to(dtype=torch.float64)
 
     return pack_true_legacy_state(x_coil, xf)
 
@@ -56,11 +61,11 @@ def test_fullstate_step_dimension():
     state_dim = true_legacy_state_dim(n_act)  # Should be 18*1 + 15 = 33
     assert state_dim == 33, f"Expected state_dim=33, got {state_dim}"
 
-    x = get_initial_state(n_act)
+    params_dict = get_params()
+    x = get_initial_state(params_dict, n_act)
     u = torch.zeros((n_act, 3), dtype=torch.float64)
 
     dt = 0.01
-    params_dict = get_params()
 
     # Step forward using Python wrapper
     x_next, obs = true_legacy_step(x, u, dt, n_act=n_act, catheter_params=params_dict)
@@ -75,13 +80,13 @@ def test_fullstate_step_dimension():
 def test_fullstate_step_finiteness():
     """Test that outputs are finite (no NaN or Inf)."""
     n_act = 1
-    x = get_initial_state(n_act)
+    params_dict = get_params()
+    x = get_initial_state(params_dict, n_act)
 
     # Apply small non-zero control
     u = torch.tensor([[0.1, -0.05, 0.08]], dtype=torch.float64)  # Shape: [n_act, 3]
 
     dt = 0.01
-    params_dict = get_params()
 
     x_next, obs = true_legacy_step(x, u, dt, n_act=n_act, catheter_params=params_dict)
 
@@ -96,13 +101,13 @@ def test_fullstate_step_determinism():
     """Test that step forward is deterministic."""
     n_act = 1
     torch.manual_seed(123)
-    x = get_initial_state(n_act)
+    params_dict = get_params()
+    x = get_initial_state(params_dict, n_act)
     x += torch.randn_like(x) * 0.01  # Small perturbation
 
     u = torch.tensor([[0.15, -0.1, 0.05]], dtype=torch.float64)  # Shape: [n_act, 3]
 
     dt = 0.01
-    params_dict = get_params()
 
     # Run twice with same inputs
     x_next1, obs1 = true_legacy_step(x, u, dt, n_act=n_act, catheter_params=params_dict)
@@ -118,14 +123,15 @@ def test_fullstate_step_determinism():
 def test_fullstate_step_multistep():
     """Test a short 5-step rollout."""
     n_act = 1
-    x = get_initial_state(n_act)
+    params_dict = get_params()
+    x = get_initial_state(params_dict, n_act)
 
     dt = 0.01
     num_steps = 5
-    params_dict = get_params()
 
     tip_positions = []
 
+    warmstart = None
     for t in range(num_steps):
         # Time-varying control (small to avoid numerical instability)
         u = torch.tensor([[
@@ -134,7 +140,10 @@ def test_fullstate_step_multistep():
             0.01 * np.sin(2 * np.pi * t / 5)
         ]], dtype=torch.float64)  # Shape: [n_act, 3]
 
-        x, obs = true_legacy_step(x, u, dt, n_act=n_act, catheter_params=params_dict)
+        x, obs = true_legacy_step(
+            x, u, dt, n_act=n_act, catheter_params=params_dict, warmstart=warmstart
+        )
+        warmstart = obs['warmstart_next']
 
         assert torch.all(torch.isfinite(x)), f"Step {t}: x not finite"
         assert torch.all(torch.isfinite(obs['tip_p'])), f"Step {t}: tip_p not finite"
@@ -157,17 +166,21 @@ def test_fullstate_step_zero_control():
     """Test that zero control produces stable (finite) evolution."""
     n_act = 1
     torch.manual_seed(456)
-    x = get_initial_state(n_act)
+    params_dict = get_params()
+    x = get_initial_state(params_dict, n_act)
     x += torch.randn_like(x) * 0.01  # Very small initial perturbation
 
     u = torch.zeros((n_act, 3), dtype=torch.float64)
 
     dt = 0.01
-    params_dict = get_params()
 
     # Run 10 steps with zero control
+    warmstart = None
     for t in range(10):
-        x, obs = true_legacy_step(x, u, dt, n_act=n_act, catheter_params=params_dict)
+        x, obs = true_legacy_step(
+            x, u, dt, n_act=n_act, catheter_params=params_dict, warmstart=warmstart
+        )
+        warmstart = obs['warmstart_next']
 
         assert torch.all(torch.isfinite(x)), f"Step {t}: x not finite"
         assert torch.all(torch.isfinite(obs['tip_p'])), f"Step {t}: tip_p not finite"

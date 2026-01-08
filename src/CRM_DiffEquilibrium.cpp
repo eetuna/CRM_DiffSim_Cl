@@ -2,6 +2,8 @@
 #include "CRM_BVPIVP_APIDeclarations.hpp"
 #include "CRM_FK_InternalAPI.hpp"
 #include "CRM_IVPJacobian.hpp"
+#include <array>
+#include <vector>
 
 using namespace Eigen;
 
@@ -93,6 +95,26 @@ int equilibrium_forward(
 
     AugmentedStateVector<IVPJacobiansFull> x_N;
     CRMSolverIVP_CoreWithJacobian(CoreParams, deltau0_calc, ftip_calc, x_N, MomentResidual);
+
+    // Also compute coil poses from kinematics for initialization consumers.
+    StateVector x_N_core;
+    double dummyPE = 0.0;
+    double out_R_atActuators[NUM_ACT_SET][9];
+    double out_p_atActuators[NUM_ACT_SET][3];
+    std::vector<std::array<double, 3>> p_atLocMarkers(CoreParams.no_locmarkers);
+    CRMSolverIVP_Core(
+        CoreParams, deltau0_calc, ftip_calc, x_N_core, MomentResidual, dummyPE,
+        reinterpret_cast<double (*)[3]>(p_atLocMarkers.data()),
+        out_R_atActuators, out_p_atActuators
+    );
+    for (int act = 0; act < NUM_ACT_SET; ++act) {
+        for (int i = 0; i < 9; ++i) {
+            out.coil_R[act][i] = out_R_atActuators[act][i];
+        }
+        for (int i = 0; i < 3; ++i) {
+            out.coil_p[act][i] = out_p_atActuators[act][i];
+        }
+    }
 
     // Extract Jacobian blocks (row-major layout)
     for (int i = 0; i < 9; i++) {

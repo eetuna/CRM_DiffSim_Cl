@@ -79,7 +79,7 @@ void compute_bvp_residual(
 }
 
 // Compute BVP Jacobians using strictly analytic differentiation
-// NO finite differences - uses analytic IVP Jacobians and chain rule
+// Analytic only - uses IVP Jacobians and chain rule
 //
 // IMPLEMENTATION:
 // The BVP residual r(mL, nL, u) is computed by forward integration (IVP).
@@ -213,7 +213,7 @@ void compute_bvp_jacobians_fmad(
         eqn_params.xf[i] = xf[i];
     }
 
-    // Compute BVP Jacobians using forward-mode AD with Dual numbers (NO FD)
+    // Compute BVP Jacobians using forward-mode AD with Dual numbers (analytic only)
     //
     // The shooting method BVP has structure:
     // residual r(mL, nL) = [moment_balance; force_balance] at each interface
@@ -234,7 +234,7 @@ void compute_bvp_jacobians_fmad(
     // For the converged solution, the dominant term is the direct dependence.
     // We use forward-mode AD to capture this structure with Dual numbers.
 
-    // Compute J_yy = ∂r/∂y where y = [mL; nL] using forward-mode AD (NO FD)
+    // Compute J_yy = ∂r/∂y where y = [mL; nL] using forward-mode AD (analytic only)
     // CRITICAL: Must capture mL↔nL coupling for correct implicit gradients
     //
     // Sprint S12: Use DYNNLEquation_YY_T with Dual numbers to compute exact J_yy
@@ -290,7 +290,7 @@ void compute_bvp_jacobians_fmad(
         }
     }
 
-    // Compute J_yu using forward-mode automatic differentiation (NO FD, NO heuristics)
+    // Compute J_yu using forward-mode automatic differentiation (analytic only)
     //
     // Sprint S8: Exact J_yu via correct physical seeding of the u → MagMoment → muhat chain.
     // Physical mapping: MagMoment[j] = CoilAlignmentTurnAreaMatrix[j] * u[j]
@@ -352,7 +352,7 @@ void compute_bvp_jacobians_fmad(
 
 
 // A3.5: Compute full BVP Jacobians including state dependencies
-// Computes J_yy, J_yu, and J_yx = ∂r/∂x_t analytically using forward-mode AD (NO FD, NO assumptions)
+// Computes J_yy, J_yu, and J_yx = ∂r/∂x_t analytically using forward-mode AD (analytic only)
 //
 // The BVP residual r(y; x_t, u) where y = [mL; nL] and x_t = [x_coil; xf]
 // depends on the state through:
@@ -384,7 +384,7 @@ void compute_bvp_jacobians_full_analytic(
     J_yx.resize(dim_y, dim_x);
     J_yx.setZero();
 
-    // Compute J_yx using forward-mode AD (analytic, NO FD)
+    // Compute J_yx using forward-mode AD (analytic only)
     // Strategy: Seed each component of x = [x_coil; xf] with Dual(., 1)
     // and evaluate DYNNLEquation_T to extract ∂r/∂x from the Dual derivatives.
 

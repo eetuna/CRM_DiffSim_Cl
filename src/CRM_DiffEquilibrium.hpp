@@ -11,6 +11,8 @@ struct EquilibriumResult {
     double p_tip[3];                      // Tip position (mm)
     double deltau0[3];                    // Solved base curvature
     int converged;                        // 0=success, >0=local min
+    double coil_R[NUM_ACT_SET][9];        // Coil orientations (distal to proximal)
+    double coil_p[NUM_ACT_SET][3];        // Coil positions (distal to proximal)
 
     // Cached Jacobians for backward (row-major storage)
     double J_p_u0[9];                     // ∂p_tip/∂Δu₀ (3×3)

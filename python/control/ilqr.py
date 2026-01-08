@@ -16,12 +16,10 @@ Control: u ∈ ℝ^(3·N) (currents)
 Observable: p_tip(x) ∈ ℝ³ (tip position)
 """
 import numpy as np
-import torch
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'build'))
 import crm_diff_py
-from control.true_legacy_step_autograd import true_legacy_step_torch
 from control.true_legacy_state_adapter import (
     pack_true_legacy_state, unpack_true_legacy_state, true_legacy_state_dim
 )
@@ -42,7 +40,7 @@ class iLQRSolver:
                  n_act=1,
                  Q=None, R=None, p_target=None, terminal_weight=100.0,
                  max_iters=50, tol=1e-3, reg_init=1e-3, reg_scale=10.0,
-                 line_search_alphas=None, terminal_hessian_mode="gn", eps_hessian=1e-5,
+                 line_search_alphas=None, terminal_hessian_mode="gn",
                  jacobian_mode="implicit"):
         """
         Args:
@@ -62,11 +60,8 @@ class iLQRSolver:
             line_search_alphas: list of floats, line search step sizes
             terminal_hessian_mode: str, terminal Hessian computation mode
                                   "gn": Gauss-Newton approximation (default)
-                                  "fd_exact": FD-based exact Hessian
-            eps_hessian: float, finite difference step size for fd_exact mode
             jacobian_mode: str, Jacobian computation mode
                           "implicit": Analytic implicit function theorem (default, fastest)
-                          "torch": PyTorch autograd
                           "cpp": Alias for "implicit"
         """
         self.dt = dt
@@ -93,15 +88,18 @@ class iLQRSolver:
         self.line_search_alphas = line_search_alphas if line_search_alphas is not None else \
                                   [1.0, 0.5, 0.25, 0.1, 0.05, 0.01]
 
-        # Terminal Hessian options
-        if terminal_hessian_mode not in ["gn", "fd_exact"]:
-            raise ValueError(f"terminal_hessian_mode must be 'gn' or 'fd_exact', got '{terminal_hessian_mode}'")
+        # Terminal Hessian options (analytic only)
+        if terminal_hessian_mode != "gn":
+            raise ValueError(
+                f"terminal_hessian_mode must be 'gn' (analytic only), got '{terminal_hessian_mode}'"
+            )
         self.terminal_hessian_mode = terminal_hessian_mode
-        self.eps_hessian = eps_hessian
 
         # Jacobian mode
-        if jacobian_mode not in ["implicit", "torch", "cpp"]:
-            raise ValueError(f"jacobian_mode must be 'implicit', 'torch', or 'cpp', got '{jacobian_mode}'")
+        if jacobian_mode not in ["implicit", "cpp"]:
+            raise ValueError(
+                f"jacobian_mode must be 'implicit' (or 'cpp' alias), got '{jacobian_mode}'"
+            )
         # Map "cpp" to "implicit" for backward compatibility
         self.jacobian_mode = "implicit" if jacobian_mode == "cpp" else jacobian_mode
 
@@ -109,6 +107,18 @@ class iLQRSolver:
         self.cost_history = []
         self.tip_error_history = []
         self.reg_history = []
+
+    def _assert_state_dim(self, x, name):
+        if x.shape != (self.state_dim,):
+            raise ValueError(
+                f"{name} must have shape ({self.state_dim},), got {x.shape}"
+            )
+
+    def _assert_control_seq_dim(self, U, name):
+        if U.shape != (self.horizon, self.control_dim):
+            raise ValueError(
+                f"{name} must have shape ({self.horizon}, {self.control_dim}), got {U.shape}"
+            )
 
     def forward_rollout(self, x0, U):
         """
@@ -123,6 +133,9 @@ class iLQRSolver:
             P_tip: np.array (horizon+1, 3), tip positions
             cost: float, total trajectory cost
         """
+        self._assert_state_dim(x0, "x0")
+        self._assert_control_seq_dim(U, "U")
+
         X = np.zeros((self.horizon + 1, self.state_dim))
         P_tip = np.zeros((self.horizon + 1, 3))
         cost = 0.0
@@ -134,6 +147,10 @@ class iLQRSolver:
         P_tip[0] = xf[:3]  # First 3 elements of xf are p_tip
 
         # Rollout
+        warmstart = None
+        warmstart_seed = None
+        warmstart_in_cache = []
+        warmstart_out_cache = []
         for t in range(self.horizon):
             x_t = X[t]
             u_t = U[t]
@@ -144,11 +161,22 @@ class iLQRSolver:
             # Dynamics step using true_legacy_step
             x_coil_t, xf_t = unpack_true_legacy_state(x_t, self.n_act)
             u_t_reshaped = u_t.reshape(self.n_act, 3)
+            warmstart_in = warmstart
+            mL_guess = warmstart_in['mL_guess'] if warmstart_in is not None else None
+            nL_guess = warmstart_in['nL_guess'] if warmstart_in is not None else None
             result = crm_diff_py.true_legacy_step_forward(
-                x_coil_t, xf_t, u_t_reshaped, self.dt, self.params_dict
+                x_coil_t, xf_t, u_t_reshaped, self.dt, self.params_dict, mL_guess, nL_guess
             )
             if not result['converged']:
                 raise RuntimeError(f"Forward rollout failed at t={t}: converged={result['converged']}")
+            warmstart = {
+                'mL_guess': np.ascontiguousarray(result['mL_next'], dtype=np.float64),
+                'nL_guess': np.ascontiguousarray(result['nL_next'], dtype=np.float64),
+            }
+            if warmstart_seed is None:
+                warmstart_seed = warmstart
+            warmstart_in_cache.append(warmstart_in)
+            warmstart_out_cache.append(warmstart)
 
             # Pack next state
             X[t+1] = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])
@@ -158,38 +186,14 @@ class iLQRSolver:
         tip_error = P_tip[-1] - self.p_target
         cost += self.terminal_weight * np.dot(tip_error, tip_error)
 
+        self._warmstart_seed = warmstart_seed
+        self._warmstart_cache = {
+            'in': warmstart_in_cache,
+            'out': warmstart_out_cache,
+        }
         return X, P_tip, cost
 
-    def extract_jacobians_pytorch(self, x_t, u_t):
-        """
-        Extract linearization A_t, B_t using PyTorch autograd.
-
-        Args:
-            x_t: np.array (state_dim,)
-            u_t: np.array (control_dim,)
-
-        Returns:
-            A: np.array (state_dim, state_dim), state Jacobian
-            B: np.array (state_dim, control_dim), control Jacobian
-        """
-        x_t_torch = torch.tensor(x_t, dtype=torch.float64, requires_grad=True)
-        u_t_torch = torch.tensor(u_t, dtype=torch.float64, requires_grad=True)
-
-        # A = ∂x_next/∂x_t
-        A = torch.autograd.functional.jacobian(
-            lambda x: true_legacy_step_torch(x, u_t_torch, self.dt, self.L_inserted, self.params_dict, self.n_act),
-            x_t_torch
-        ).numpy()
-
-        # B = ∂x_next/∂u_t
-        B = torch.autograd.functional.jacobian(
-            lambda u: true_legacy_step_torch(x_t_torch, u, self.dt, self.L_inserted, self.params_dict, self.n_act),
-            u_t_torch
-        ).numpy()
-
-        return A, B
-
-    def extract_jacobians_cpp(self, x_t, u_t):
+    def extract_jacobians_cpp(self, x_t, u_t, warmstart_in=None, warmstart_out=None):
         """
         Extract linearization A_t, B_t using C++ implicit linearization.
 
@@ -203,16 +207,53 @@ class iLQRSolver:
         """
         # Reshape u to [n_act, 3] for true_legacy_linearize
         u_reshaped = u_t.reshape(self.n_act, 3)
-        A, B = true_legacy_linearize(
-            x_t, u_reshaped, self.dt,
-            n_act=self.n_act,
-            catheter_params=self.params_dict,
-            L_inserted=self.L_inserted,
-            method="implicit"
-        )
-        return A, B
+        def _linearize_with(ws):
+            return true_legacy_linearize(
+                x_t, u_reshaped, self.dt,
+                n_act=self.n_act,
+                catheter_params=self.params_dict,
+                L_inserted=self.L_inserted,
+                method="implicit",
+                mL_guess=None if ws is None else ws['mL_guess'],
+                nL_guess=None if ws is None else ws['nL_guess'],
+            )
 
-    def extract_jacobians(self, x_t, u_t):
+        candidates = []
+
+        def _add_candidate(ws):
+            if ws is None:
+                return
+            if (not np.isfinite(ws['mL_guess']).all()) or (not np.isfinite(ws['nL_guess']).all()):
+                return
+            if any(ws is c for c in candidates):
+                return
+            candidates.append(ws)
+
+        if hasattr(self, "_warmstart_seed"):
+            _add_candidate(self._warmstart_seed)
+        _add_candidate(warmstart_in)
+        _add_candidate(warmstart_out)
+
+        if hasattr(self, "_warmstart_cache") and self._warmstart_cache is not None:
+            for ws in self._warmstart_cache.get('out', []):
+                _add_candidate(ws)
+
+        candidates.append(None)
+
+        last_error = None
+        for ws in candidates:
+            try:
+                A, B = _linearize_with(ws)
+            except RuntimeError as exc:
+                last_error = exc
+                continue
+            if np.isfinite(A).all() and np.isfinite(B).all():
+                return A, B
+            last_error = RuntimeError("Linearization returned non-finite A/B.")
+
+        raise last_error if last_error is not None else RuntimeError("Linearization failed without candidates.")
+
+    def extract_jacobians(self, x_t, u_t, warmstart_in=None, warmstart_out=None):
         """
         Extract linearization A_t, B_t using configured jacobian_mode.
 
@@ -224,16 +265,19 @@ class iLQRSolver:
             A: np.array (state_dim, state_dim), state Jacobian
             B: np.array (state_dim, control_dim), control Jacobian
         """
-        if self.jacobian_mode == "torch":
-            return self.extract_jacobians_pytorch(x_t, u_t)
-        elif self.jacobian_mode == "implicit":
-            return self.extract_jacobians_cpp(x_t, u_t)
+        self._assert_state_dim(x_t, "x_t")
+        if u_t.shape != (self.control_dim,):
+            raise ValueError(
+                f"u_t must have shape ({self.control_dim},), got {u_t.shape}"
+            )
+        if self.jacobian_mode == "implicit":
+            return self.extract_jacobians_cpp(x_t, u_t, warmstart_in=warmstart_in, warmstart_out=warmstart_out)
         else:
             raise ValueError(f"Unknown jacobian_mode: {self.jacobian_mode}")
 
     def compute_tip_jacobian(self, x):
         """
-        Compute ∂p_tip/∂x using true_legacy_tip_jacobian or PyTorch autograd.
+        Compute ∂p_tip/∂x using analytic TRUE legacy Jacobian.
 
         Args:
             x: np.array (state_dim,), state
@@ -241,71 +285,9 @@ class iLQRSolver:
         Returns:
             J_p: np.array (3, state_dim), tip position Jacobian
         """
-        if self.jacobian_mode == "cpp":
-            # Use C++ implementation
-            result = true_legacy_tip_jacobian(x, self.L_inserted, self.params_dict, self.n_act)
-            return result['J_tip']
-        else:
-            # Use PyTorch autograd
-            x_torch = torch.tensor(x, dtype=torch.float64, requires_grad=True)
-
-            def tip_position_fn(x_in):
-                x_coil, xf = unpack_true_legacy_state(x_in.detach().cpu().numpy(), self.n_act)
-                # Tip position is first 3 elements of xf
-                return torch.from_numpy(xf[:3])
-
-            J_p = torch.autograd.functional.jacobian(tip_position_fn, x_torch).numpy()
-            return J_p
-
-    def compute_terminal_hessian_fd_exact(self, x, tip_error):
-        """
-        Compute exact terminal Hessian via finite differences.
-
-        Terminal cost: l_T(x) = w * ||p_tip(x) - p_target||^2
-        Exact Hessian: H = 2w * (J^T J + Σ_k e_k * H_k)
-
-        Args:
-            x: np.array (state_dim,), terminal state
-            tip_error: np.array (3,), error vector e = p_tip - p_target
-
-        Returns:
-            V_xx: np.array (state_dim, state_dim), exact terminal Hessian
-        """
-        # Compute Jacobian at nominal point
-        J_p = self.compute_tip_jacobian(x)  # (3, state_dim)
-
-        # Gauss-Newton term: J^T J
-        H_gn = J_p.T @ J_p  # (state_dim, state_dim)
-
-        # Second-order term via FD: Σ_k e_k * H_k
-        H_second_order = np.zeros((self.state_dim, self.state_dim))
-
-        eps = self.eps_hessian
-
-        for i in range(self.state_dim):
-            # Perturb state in dimension i
-            x_plus = x.copy()
-            x_minus = x.copy()
-            x_plus[i] += eps
-            x_minus[i] -= eps
-
-            # Compute Jacobians at perturbed states
-            J_plus = self.compute_tip_jacobian(x_plus)   # (3, state_dim)
-            J_minus = self.compute_tip_jacobian(x_minus)  # (3, state_dim)
-
-            # Finite difference approximation of dJ/dx_i
-            dJ_dxi = (J_plus - J_minus) / (2.0 * eps)  # (3, state_dim)
-
-            # Contract with error vector
-            H_second_order[i, :] = tip_error @ dJ_dxi  # (state_dim,)
-
-        # Combine terms and apply weight
-        H_exact = 2.0 * self.terminal_weight * (H_gn + H_second_order)
-
-        # Symmetrize
-        H_exact = 0.5 * (H_exact + H_exact.T)
-
-        return H_exact
+        self._assert_state_dim(x, "x")
+        # Use analytic tip Jacobian (identity in tip position block)
+        return true_legacy_tip_jacobian(x, self.n_act, method="analytic")
 
     def backward_pass(self, X, U, verbose_debug=False):
         """
@@ -326,7 +308,16 @@ class iLQRSolver:
         A_list = []
         B_list = []
         for t in range(self.horizon):
-            A_t, B_t = self.extract_jacobians(X[t], U[t])
+            warmstart_in = None
+            warmstart_out = None
+            if hasattr(self, "_warmstart_cache") and self._warmstart_cache is not None:
+                if t < len(self._warmstart_cache.get('in', [])):
+                    warmstart_in = self._warmstart_cache['in'][t]
+                if t < len(self._warmstart_cache.get('out', [])):
+                    warmstart_out = self._warmstart_cache['out'][t]
+            A_t, B_t = self.extract_jacobians(
+                X[t], U[t], warmstart_in=warmstart_in, warmstart_out=warmstart_out
+            )
             A_list.append(A_t)
             B_list.append(B_t)
 
@@ -343,8 +334,6 @@ class iLQRSolver:
         if self.terminal_hessian_mode == "gn":
             V_xx = 2.0 * self.terminal_weight * (J_p.T @ J_p)  # (state_dim, state_dim)
             V_xx = 0.5 * (V_xx + V_xx.T)
-        elif self.terminal_hessian_mode == "fd_exact":
-            V_xx = self.compute_terminal_hessian_fd_exact(X[-1], tip_error)
         else:
             raise ValueError(f"Unknown terminal_hessian_mode: {self.terminal_hessian_mode}")
 
@@ -461,6 +450,10 @@ class iLQRSolver:
 
         X_new[0] = x0
 
+        warmstart = None
+        warmstart_seed = None
+        warmstart_in_cache = []
+        warmstart_out_cache = []
         for t in range(self.horizon):
             # Compute control
             dx = X_new[t] - X_nom[t]
@@ -477,11 +470,22 @@ class iLQRSolver:
             # Dynamics step
             x_coil_t, xf_t = unpack_true_legacy_state(X_new[t], self.n_act)
             u_new_reshaped = u_new.reshape(self.n_act, 3)
+            warmstart_in = warmstart
+            mL_guess = warmstart_in['mL_guess'] if warmstart_in is not None else None
+            nL_guess = warmstart_in['nL_guess'] if warmstart_in is not None else None
             result = crm_diff_py.true_legacy_step_forward(
-                x_coil_t, xf_t, u_new_reshaped, self.dt, self.params_dict
+                x_coil_t, xf_t, u_new_reshaped, self.dt, self.params_dict, mL_guess, nL_guess
             )
             if not result['converged']:
                 return None, None, np.inf
+            warmstart = {
+                'mL_guess': np.ascontiguousarray(result['mL_next'], dtype=np.float64),
+                'nL_guess': np.ascontiguousarray(result['nL_next'], dtype=np.float64),
+            }
+            if warmstart_seed is None:
+                warmstart_seed = warmstart
+            warmstart_in_cache.append(warmstart_in)
+            warmstart_out_cache.append(warmstart)
 
             X_new[t+1] = pack_true_legacy_state(result['x_coil_next'], result['xf_next'])
 
@@ -491,6 +495,11 @@ class iLQRSolver:
         tip_error = p_tip_final - self.p_target
         cost_new += self.terminal_weight * np.dot(tip_error, tip_error)
 
+        self._warmstart_seed = warmstart_seed
+        self._warmstart_cache = {
+            'in': warmstart_in_cache,
+            'out': warmstart_out_cache,
+        }
         return X_new, U_new, cost_new
 
     def solve(self, x0, U_init=None, init_method="zero", verbose=True):
@@ -510,8 +519,10 @@ class iLQRSolver:
             U: np.array (horizon, control_dim), optimal control sequence
             converged: bool, whether solver converged
         """
+        self._assert_state_dim(x0, "x0")
         # Initialize controls
         if U_init is not None:
+            self._assert_control_seq_dim(U_init, "U_init")
             U = U_init.copy()
             if verbose:
                 print(f"[iLQR] Using provided U_init")

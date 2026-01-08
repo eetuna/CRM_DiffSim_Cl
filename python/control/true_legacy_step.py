@@ -314,8 +314,9 @@ def true_legacy_linearize(
     n_act: int,
     catheter_params: Dict,
     L_inserted: float = 100.0,
-    method: str = "implicit",  # "implicit", "torch_autograd", or "finite_diff"
-    eps: float = 1e-7
+    method: str = "implicit",
+    mL_guess: np.ndarray = None,
+    nL_guess: np.ndarray = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute linearization Jacobians A, B for TRUE legacy dynamics.
@@ -330,8 +331,9 @@ def true_legacy_linearize(
         n_act: Number of actuators
         catheter_params: Physics parameters
         L_inserted: Insertion depth (mm)
-        method: "implicit" (default, analytic via IFT), "torch_autograd", or "finite_diff"
-        eps: Finite difference epsilon (if method="finite_diff")
+        method: "implicit" (default, analytic via IFT)
+        mL_guess: Optional warm-start interface moments [n_act, 3]
+        nL_guess: Optional warm-start interface forces [n_act, 3]
 
     Returns:
         A: State Jacobian [state_dim, state_dim]
@@ -341,16 +343,14 @@ def true_legacy_linearize(
     control_dim = n_act * 3
 
     if method == "implicit":
-        return _linearize_implicit(x, u, dt, n_act, catheter_params, L_inserted)
-    elif method == "torch_autograd":
-        return _linearize_autograd(x, u, dt, n_act, catheter_params, L_inserted)
-    elif method == "finite_diff":
-        return _linearize_finite_diff(x, u, dt, n_act, catheter_params, L_inserted, eps)
+        return _linearize_implicit(
+            x, u, dt, n_act, catheter_params, L_inserted, mL_guess, nL_guess
+        )
     else:
-        raise ValueError(f"Unknown method: {method}. Use 'implicit', 'torch_autograd', or 'finite_diff'")
+        raise ValueError(f"Unknown method: {method}. Use 'implicit'.")
 
 
-def _linearize_implicit(x, u, dt, n_act, catheter_params, L_inserted):
+def _linearize_implicit(x, u, dt, n_act, catheter_params, L_inserted, mL_guess, nL_guess):
     """Compute Jacobians using C++ implicit function theorem implementation."""
     # Unpack state
     x_coil, xf = unpack_true_legacy_state(x, n_act)
@@ -366,7 +366,7 @@ def _linearize_implicit(x, u, dt, n_act, catheter_params, L_inserted):
 
     # Call C++ binding
     result = crm_diff_py.true_legacy_linearize(
-        x_coil_np, xf_np, u_np, dt, params_dict
+        x_coil_np, xf_np, u_np, dt, params_dict, mL_guess, nL_guess
     )
 
     A = result['A']  # [state_dim, state_dim]
@@ -378,94 +378,10 @@ def _linearize_implicit(x, u, dt, n_act, catheter_params, L_inserted):
     return A, B_flat
 
 
-def _linearize_autograd(x, u, dt, n_act, catheter_params, L_inserted):
-    """Compute Jacobians using PyTorch autograd."""
-    from .true_legacy_step_autograd import true_legacy_step_torch
-
-    # Convert to torch
-    x_torch = torch.tensor(x, dtype=torch.float64, requires_grad=True)
-    u_torch_flat = torch.tensor(u.flatten(), dtype=torch.float64, requires_grad=True)
-    u_reshaped = u_torch_flat.reshape(n_act, 3)
-
-    # A = ∂x_next/∂x (state Jacobian)
-    def dynamics_x(x_in):
-        _, x_next = true_legacy_step_torch(
-            x_in, u_reshaped, dt, n_act=n_act,
-            catheter_params=catheter_params,
-            L_inserted=L_inserted,
-            return_x_next=True
-        )
-        return x_next
-
-    A = torch.autograd.functional.jacobian(dynamics_x, x_torch).detach().numpy()
-
-    # B = ∂x_next/∂u (control Jacobian)
-    def dynamics_u(u_flat):
-        u_in = u_flat.reshape(n_act, 3)
-        _, x_next = true_legacy_step_torch(
-            x_torch, u_in, dt, n_act=n_act,
-            catheter_params=catheter_params,
-            L_inserted=L_inserted,
-            return_x_next=True
-        )
-        return x_next
-
-    B_flat = torch.autograd.functional.jacobian(dynamics_u, u_torch_flat).detach().numpy()
-
-    return A, B_flat
-
-
-def _linearize_finite_diff(x, u, dt, n_act, catheter_params, L_inserted, eps):
-    """Compute Jacobians using finite differences."""
-    from .true_legacy_step_autograd import true_legacy_step_torch
-
-    state_dim = 18 * n_act + 15
-    control_dim = n_act * 3
-
-    # Nominal forward
-    x_torch = torch.from_numpy(x.astype(np.float64))
-    u_torch = torch.from_numpy(u.astype(np.float64))
-    _, x_next_nom = true_legacy_step_torch(
-        x_torch, u_torch, dt, n_act=n_act,
-        catheter_params=catheter_params,
-        L_inserted=L_inserted,
-        return_x_next=True
-    )
-    x_next_nom = x_next_nom.detach().numpy()
-
-    # A = ∂x_next/∂x via forward differences
-    A = np.zeros((state_dim, state_dim))
-    for i in range(state_dim):
-        x_pert = x.copy()
-        x_pert[i] += eps
-        _, x_next_pert = true_legacy_step_torch(
-            torch.from_numpy(x_pert.astype(np.float64)), u_torch, dt,
-            n_act=n_act, catheter_params=catheter_params,
-            L_inserted=L_inserted, return_x_next=True
-        )
-        A[:, i] = (x_next_pert.detach().numpy() - x_next_nom) / eps
-
-    # B = ∂x_next/∂u (u is [n_act, 3])
-    B = np.zeros((state_dim, control_dim))
-    u_flat = u.flatten()
-    for j in range(control_dim):
-        u_pert_flat = u_flat.copy()
-        u_pert_flat[j] += eps
-        u_pert = u_pert_flat.reshape(n_act, 3)
-        _, x_next_pert = true_legacy_step_torch(
-            x_torch, torch.from_numpy(u_pert.astype(np.float64)), dt,
-            n_act=n_act, catheter_params=catheter_params,
-            L_inserted=L_inserted, return_x_next=True
-        )
-        B[:, j] = (x_next_pert.detach().numpy() - x_next_nom) / eps
-
-    return A, B
-
-
 def true_legacy_tip_jacobian(
     x: np.ndarray,
     n_act: int,
-    method: str = "analytic"  # or "autograd"
+    method: str = "analytic"
 ) -> np.ndarray:
     """
     Compute ∂p_tip/∂x for TRUE legacy state.
@@ -476,7 +392,7 @@ def true_legacy_tip_jacobian(
     Args:
         x: State [18*n_act + 15]
         n_act: Number of actuators
-        method: "analytic" (extract from state) or "autograd"
+        method: "analytic" (extract from state)
 
     Returns:
         J_p: [3, 18*n_act+15] Jacobian of tip position w.r.t. state
@@ -492,21 +408,5 @@ def true_legacy_tip_jacobian(
         J_p[2, tip_state_start + 2] = 1.0  # p_z
         return J_p
 
-    elif method == "autograd":
-        import torch
-        x_torch = torch.tensor(x, dtype=torch.float64, requires_grad=True)
-
-        # Extract tip position (first 3 of last 15)
-        tip_state_start = 18 * n_act
-        p_tip = x_torch[tip_state_start:tip_state_start+3]
-
-        # Compute Jacobian
-        J_p = torch.autograd.functional.jacobian(
-            lambda x_in: x_in[tip_state_start:tip_state_start+3],
-            x_torch
-        ).detach().numpy()
-
-        return J_p
-
     else:
-        raise ValueError(f"Unknown method: {method}. Use 'analytic' or 'autograd'")
+        raise ValueError(f"Unknown method: {method}. Use 'analytic'.")
